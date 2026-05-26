@@ -68,11 +68,13 @@ jobs:
       # Reads app metadata (org/product/company/copyright) and the entry point
       # from [tool.flet] / [tool.flet.app] in pyproject.toml. Bundles a CPython
       # runtime + pip deps (flet, sqlmodel, openpyxl) into the output.
-      # `yes | ...` answers flet's "install Flutter? [y/n]" prompt as a safety
-      # net (CI has no interactive stdin) in case it still wants its own copy.
+      # `printf 'y\n' | ...` answers a possible "install Flutter? [y/n]" prompt
+      # without the SIGPIPE that `yes` causes: GitHub bash runs with pipefail,
+      # so `yes` dying when flet closes the pipe would fail the step (exit 141)
+      # even on a successful build. printf writes once and exits 0.
       - name: Build Windows app
         shell: bash
-        run: yes | flet build windows -v --build-version ${{ steps.ver.outputs.version }}
+        run: printf 'y\n' | flet build windows -v --build-version ${{ steps.ver.outputs.version }}
 
       - name: Show build output
         shell: bash
