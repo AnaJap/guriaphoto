@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# Package tooling
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# SQLite local data
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Flet build artifacts
+/build/
+/dist/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Legacy workbook — contains real business data, never commit (public repo)
+Kodak.xlsx
+*.xlsx
+
+# Local per-machine config / databases (never committed)
+config.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

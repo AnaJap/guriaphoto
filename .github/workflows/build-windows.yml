@@ -1,0 +1,96 @@
+name: Build Windows
+
+# Builds a standalone Windows .exe (Python + all deps bundled) and wraps it in
+# an Inno Setup installer. Runs on a Windows cloud runner because flet/Flutter
+# cannot cross-compile a Windows app from macOS/Linux.
+#
+# Trigger manually (Actions → Build Windows → Run workflow) or by pushing a
+# version tag like `v1.0.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Build version (x.y.z)"
+        default: "1.0.0"
+        required: false
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="${{ github.event.inputs.version }}"
+          fi
+          V="${V:-1.0.0}"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building version $V"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Flutter is required by `flet build`. windows-latest already ships
+      # Visual Studio 2022 with the "Desktop development with C++" workload.
+      # If a build fails on a Flutter/VS mismatch, pin `flutter-version` here.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install Flet CLI
+        run: pip install "flet==0.84.0"
+
+      # Reads app metadata (org/product/company/copyright) and the entry point
+      # from [tool.flet] / [tool.flet.app] in pyproject.toml. Bundles a CPython
+      # runtime + pip deps (flet, sqlmodel, openpyxl) into the output.
+      - name: Build Windows app
+        run: flet build windows -v --build-version ${{ steps.ver.outputs.version }}
+
+      - name: Show build output
+        shell: bash
+        run: |
+          echo "=== build/windows ==="
+          ls -la build/windows || true
+          echo "=== launcher exe(s) ==="
+          find build/windows -maxdepth 2 -name "*.exe"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=${{ steps.ver.outputs.version }} `
+            installer\kodak.iss
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kodak-Setup-${{ steps.ver.outputs.version }}
+          path: installer/Output/Kodak-Setup-*.exe
+          if-no-files-found: error
+
+      # Fallback: the raw bundled folder, in case you want to zip/distribute it
+      # without the installer.
+      - name: Upload raw build folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodak-windows-build
+          path: build/windows/**
+          if-no-files-found: error
