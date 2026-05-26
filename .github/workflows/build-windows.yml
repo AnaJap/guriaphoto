@@ -22,6 +22,13 @@ jobs:
   build:
     runs-on: windows-latest
 
+    # Force UTF-8 stdio so the flet CLI's rich progress output (which prints
+    # Unicode glyphs like ● U+25CF) doesn't crash on the runner's default
+    # cp1252 console code page.
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
