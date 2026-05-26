@@ -47,4 +47,9 @@ company  = "Guriaphoto"
 copyright = "Copyright (C) 2026 Guriaphoto"
 
 [tool.flet.app]
-path = "src/kodak/main.py"
+# `path` is the app SOURCE DIRECTORY (relative to this file), not a file.
+# With a src layout, this must be "src" so the `kodak` package is importable
+# and `from kodak.xxx import ...` works inside the bundle.
+path = "src"
+# Dotted entry module (maps to --module-name). src/kodak/main.py → kodak.main.
+module = "kodak.main"

@@ -1,4 +1,4 @@
-"""Generate assets/icon.png — the branded Kodak "K" badge app icon.
+"""Generate src/assets/icon.png — the branded Kodak "K" badge app icon.
 
 Dev-only tool (requires Pillow). Run once to (re)generate the icon, then
 commit the resulting PNG. The icon is NOT a runtime dependency.
@@ -6,8 +6,8 @@ commit the resulting PNG. The icon is NOT a runtime dependency.
     uv pip install --python venv/bin/python pillow
     PYTHONPATH=src venv/bin/python tools/make_icon.py
 
-Flet's `flet build` reads `assets/icon.png` and derives the platform icons
-(Windows .ico, macOS .icns) automatically.
+Flet's `flet build` reads `<app-path>/assets/icon.png` (app path is "src" per
+[tool.flet.app]) and derives the platform icons (Windows .ico, macOS .icns).
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def build_icon() -> Image.Image:
 
 
 def main() -> None:
-    out = Path(__file__).resolve().parents[1] / "assets" / "icon.png"
+    out = Path(__file__).resolve().parents[1] / "src" / "assets" / "icon.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     build_icon().save(out, "PNG")
     print(f"wrote {out}")

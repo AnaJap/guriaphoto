@@ -74,8 +74,8 @@ Kodak/
 │   ├── backup.py               # manual/auto backup + restore
 │   ├── models/                 # SQLModel schemas
 │   ├── services/               # business logic (incl. export.py = Excel)
-│   └── ui/                     # Flet views and components
-├── assets/icon.png             # app icon (Kodak K-badge)
+│   ├── ui/                     # Flet views and components
+│   └── assets/icon.png         # app icon (Kodak K-badge), read by flet build
 ├── tools/make_icon.py          # regenerates the icon (Pillow, dev-only)
 ├── installer/kodak.iss         # Inno Setup script (Windows installer)
 └── .github/workflows/          # CI: build-windows.yml

@@ -72,7 +72,7 @@ jobs:
       # net (CI has no interactive stdin) in case it still wants its own copy.
       - name: Build Windows app
         shell: bash
-        run: yes | flet build windows -v --build-version ${{ steps.ver.outputs.version }}
+        run: yes | flet build windows -v --module-name kodak.main --build-version ${{ steps.ver.outputs.version }}
 
       - name: Show build output
         shell: bash
