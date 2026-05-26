@@ -51,5 +51,6 @@ copyright = "Copyright (C) 2026 Guriaphoto"
 # With a src layout, this must be "src" so the `kodak` package is importable
 # and `from kodak.xxx import ...` works inside the bundle.
 path = "src"
-# Dotted entry module (maps to --module-name). src/kodak/main.py → kodak.main.
-module = "kodak.main"
+# flet looks for "<module>.py" at the root of `path` and does NOT support
+# dotted module names; src/main.py is a thin shim that calls into kodak.main.
+module = "main"
