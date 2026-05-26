@@ -46,3 +46,7 @@ config.json
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Internal planning / spec docs (not for the public repo)
+dapper-sauteeing-kitten.md
+feature-list.md
