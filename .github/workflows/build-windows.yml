@@ -53,11 +53,14 @@ jobs:
 
       # Flutter is required by `flet build`. windows-latest already ships
       # Visual Studio 2022 with the "Desktop development with C++" workload.
-      # If a build fails on a Flutter/VS mismatch, pin `flutter-version` here.
+      # The version MUST match what flet 0.84.0 expects (it prompts to install
+      # its own otherwise, which fails non-interactively in CI). If a future
+      # flet bump requires a different Flutter, update this version.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.4
 
       - name: Install Flet CLI
         run: pip install "flet==0.84.0"
@@ -65,8 +68,11 @@ jobs:
       # Reads app metadata (org/product/company/copyright) and the entry point
       # from [tool.flet] / [tool.flet.app] in pyproject.toml. Bundles a CPython
       # runtime + pip deps (flet, sqlmodel, openpyxl) into the output.
+      # `yes | ...` answers flet's "install Flutter? [y/n]" prompt as a safety
+      # net (CI has no interactive stdin) in case it still wants its own copy.
       - name: Build Windows app
-        run: flet build windows -v --build-version ${{ steps.ver.outputs.version }}
+        shell: bash
+        run: yes | flet build windows -v --build-version ${{ steps.ver.outputs.version }}
 
       - name: Show build output
         shell: bash
