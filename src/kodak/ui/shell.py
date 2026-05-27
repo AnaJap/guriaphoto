@@ -30,7 +30,7 @@ _NAV = [
     ("ნისია",       ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.Icons.ACCOUNT_BALANCE_WALLET),
     ("პროდუქტები",  ft.Icons.PHOTO_CAMERA_OUTLINED,           ft.Icons.PHOTO_CAMERA),
     ("ანგარიშები",  ft.Icons.BAR_CHART_OUTLINED,              ft.Icons.BAR_CHART),
-    ("დეშბორდები",  ft.Icons.DASHBOARD_OUTLINED,              ft.Icons.DASHBOARD),
+    ("ანალიტიკა",   ft.Icons.INSIGHTS_OUTLINED,               ft.Icons.INSIGHTS),
     ("პარამეტრები", ft.Icons.SETTINGS_OUTLINED,               ft.Icons.SETTINGS),
 ]
 

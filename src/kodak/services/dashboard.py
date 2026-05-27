@@ -7,9 +7,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from kodak.models.enums import ProductCategory
+from kodak import clock
+from kodak.models.credit import Credit, CreditPayment
+from kodak.models.enums import CreditStatus, ProductCategory
 from kodak.services.history import list_range_transactions, summarize_range
 
 
@@ -75,9 +77,9 @@ def build_dashboard(session: Session, start: dt.date, end: dt.date) -> Dashboard
             ProductRank(label=label, qty=product_qty[label], revenue=product_rev[label])
             for label in product_qty
         ],
-        key=lambda row: (row.qty, row.revenue, row.label),
+        key=lambda row: (row.revenue, row.qty, row.label),
         reverse=True,
-    )[:5]
+    )[:10]
 
     category_breakdown = [
         CategoryRank(category=cat.category, qty=cat.qty, revenue=cat.revenue)
@@ -114,5 +116,107 @@ def build_dashboard(session: Session, start: dt.date, end: dt.date) -> Dashboard
         active_days=active_days,
         top_products=top_products,
         category_breakdown=category_breakdown,
+        daily=daily,
+    )
+
+
+# ── credit (ნისია) movement ────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CreditDayPoint:
+    date: dt.date
+    issued: Decimal      # new credit extended that day
+    repaid: Decimal      # repayments collected that day
+
+
+@dataclass(frozen=True)
+class CreditMovement:
+    start: dt.date
+    end: dt.date
+    issued_amount: Decimal
+    issued_count: int
+    repaid_amount: Decimal
+    repaid_count: int
+    forgiven_amount: Decimal
+    forgiven_count: int
+    outstanding_now: Decimal     # current unpaid balance across all open credits
+    daily: list[CreditDayPoint]
+
+
+def build_credit_movement(session: Session, start: dt.date, end: dt.date) -> CreditMovement:
+    issued_credits = list(
+        session.exec(
+            select(Credit).where(Credit.date >= start).where(Credit.date <= end)
+        ).all()
+    )
+    payments = list(
+        session.exec(
+            select(CreditPayment)
+            .where(CreditPayment.date >= start)
+            .where(CreditPayment.date <= end)
+        ).all()
+    )
+
+    issued_amount = sum((c.original_amount for c in issued_credits), Decimal("0"))
+    repaid_amount = sum((p.amount for p in payments), Decimal("0"))
+
+    # Forgiven this period — forgiven_at is UTC, compare in GMT+4.
+    forgiven = [
+        c
+        for c in session.exec(
+            select(Credit).where(Credit.status == CreditStatus.forgiven)
+        ).all()
+        if c.forgiven_at and start <= clock.to_local(c.forgiven_at).date() <= end
+    ]
+    forgiven_writeoff = Decimal("0")
+    if forgiven:
+        paid: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        ids = [c.id for c in forgiven]
+        for p in session.exec(
+            select(CreditPayment).where(CreditPayment.credit_id.in_(ids))
+        ).all():
+            paid[p.credit_id] += p.amount
+        forgiven_writeoff = sum(
+            (c.original_amount - paid[c.id] for c in forgiven), Decimal("0")
+        )
+
+    outstanding_now = sum(
+        (
+            c.remaining_amount
+            for c in session.exec(
+                select(Credit).where(
+                    Credit.status.in_([CreditStatus.active, CreditStatus.partial])
+                )
+            ).all()
+        ),
+        Decimal("0"),
+    )
+
+    issued_by_day: dict[dt.date, Decimal] = defaultdict(lambda: Decimal("0"))
+    repaid_by_day: dict[dt.date, Decimal] = defaultdict(lambda: Decimal("0"))
+    for c in issued_credits:
+        issued_by_day[c.date] += c.original_amount
+    for p in payments:
+        repaid_by_day[p.date] += p.amount
+
+    daily = [
+        CreditDayPoint(
+            date=start + dt.timedelta(days=offset),
+            issued=issued_by_day[start + dt.timedelta(days=offset)],
+            repaid=repaid_by_day[start + dt.timedelta(days=offset)],
+        )
+        for offset in range(max((end - start).days, 0) + 1)
+    ]
+
+    return CreditMovement(
+        start=start,
+        end=end,
+        issued_amount=issued_amount,
+        issued_count=len(issued_credits),
+        repaid_amount=repaid_amount,
+        repaid_count=len(payments),
+        forgiven_amount=forgiven_writeoff,
+        forgiven_count=len(forgiven),
+        outstanding_now=outstanding_now,
         daily=daily,
     )
