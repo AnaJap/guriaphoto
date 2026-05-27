@@ -17,16 +17,15 @@ from kodak.db import get_session
 from kodak.models.enums import ProductCategory
 from kodak.models.user import User
 from kodak.services.report import ReportData, build_report, last_day_of_month
-from kodak.ui.geo import fmt_date, fmt_month_year, fmt_short_date, picker_date
+from kodak.ui.geo import fmt_month_year, fmt_short_date, picker_date
 from kodak.ui.theme import (
-    ACCENT_GOLD,
     RADIUS_LG,
     RADIUS_MD,
     RADIUS_SM,
-    SPACE_LG,
     SPACE_MD,
     SPACE_SM,
     SPACE_XS,
+    get_active_theme_runtime,
 )
 
 _CAT_LABEL: dict[ProductCategory, str] = {
@@ -43,7 +42,7 @@ _CAT_LABEL: dict[ProductCategory, str] = {
 _PRESETS = [
     ("month",      "ეს თვე"),
     ("last_month", "გასული თვე"),
-    ("custom",     "↕ პერიოდი"),
+    ("custom",     "პერიოდი"),
 ]
 
 
@@ -85,9 +84,10 @@ class ReportView:
         # ── mutable controls ───────────────────────────────────────
         self._preset_row   = ft.Row(spacing=SPACE_XS, wrap=True)
         self._period_ctrl  = ft.Container()   # month nav OR date pickers
-        self._summary_row  = ft.Row(spacing=SPACE_SM, wrap=True)
-        self._cat_col      = ft.Column(spacing=3, tight=True)
-        self._day_col      = ft.Column(spacing=2)
+        self._summary_row  = ft.Row(spacing=SPACE_SM, run_spacing=SPACE_SM, wrap=True)
+        self._cat_col      = ft.Column(spacing=SPACE_XS, tight=True)
+        self._day_col      = ft.Column(spacing=SPACE_XS, scroll=ft.ScrollMode.AUTO, expand=True)
+        self._breakdown_col = ft.Column(spacing=SPACE_SM, tight=True)
         self._export_label = ft.Text("", size=12, color=ft.Colors.PRIMARY)
 
         self._rebuild_preset_row()
@@ -97,61 +97,99 @@ class ReportView:
     # ── public ────────────────────────────────────────────────────
 
     def build(self) -> ft.Control:
+        runtime = get_active_theme_runtime()
         export_btn = ft.Container(
             content=ft.Row(
                 controls=[
                     ft.Icon(ft.Icons.DOWNLOAD_OUTLINED, size=16,
                             color=ft.Colors.WHITE),
-                    ft.Text("CSV", size=13, weight=ft.FontWeight.W_600,
+                    ft.Text("Excel-ში ექსპორტი", size=13, weight=ft.FontWeight.W_600,
                             color=ft.Colors.WHITE),
                 ],
                 spacing=SPACE_XS, tight=True,
             ),
-            bgcolor=ft.Colors.PRIMARY,
+            bgcolor=runtime.accent,
             border_radius=RADIUS_MD,
             padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
             on_click=self._export_csv,
             ink=True,
-            tooltip="CSV ფაილად შენახვა",
+            tooltip="Excel-ში გახსნადი ფაილად შენახვა",
+        )
+
+        period_box = ft.Container(
+            content=ft.Row(
+                controls=[
+                    self._preset_row,
+                    ft.Container(expand=True),
+                    self._period_ctrl,
+                ],
+                spacing=SPACE_MD,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+        )
+        cash_flow_panel = ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Text("სალაროს მოძრაობა", size=14, weight=ft.FontWeight.W_700),
+                    self._day_col,
+                ],
+                spacing=SPACE_SM,
+                expand=True,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_LG,
+            padding=ft.padding.all(SPACE_MD),
+            expand=True,
+        )
+        breakdown_panel = ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Text("გაყიდვები და ნისიები", size=14, weight=ft.FontWeight.W_700),
+                    self._breakdown_col,
+                    ft.Divider(height=SPACE_MD),
+                    ft.Text("კატეგორიები", size=14, weight=ft.FontWeight.W_700),
+                    self._cat_col,
+                ],
+                spacing=SPACE_SM,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_LG,
+            padding=ft.padding.all(SPACE_MD),
+            width=390,
         )
 
         self._root = ft.Column(
             controls=[
-                # Title row
                 ft.Row(
                     controls=[
-                        ft.Text("ანგარიში", size=28, weight=ft.FontWeight.W_700,
+                        ft.Text("ანგარიშები", size=28, weight=ft.FontWeight.W_700,
                                 expand=True),
-                        export_btn,
                         self._export_label,
+                        export_btn,
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                ft.Container(height=SPACE_SM),
-                # Preset chips
-                self._preset_row,
-                # Month nav or date pickers
-                self._period_ctrl,
-                ft.Container(height=SPACE_XS),
-                # Summary cards
+                period_box,
                 self._summary_row,
-                ft.Container(height=SPACE_XS),
-                # Category breakdown
-                ft.Text("კატეგორიები", size=11, weight=ft.FontWeight.W_600,
-                        color=ft.Colors.ON_SURFACE_VARIANT),
-                self._cat_col,
-                ft.Divider(height=SPACE_MD),
-                # Per-day table
-                ft.Text("დღეების მიხედვით", size=11, weight=ft.FontWeight.W_600,
-                        color=ft.Colors.ON_SURFACE_VARIANT),
-                ft.Container(
-                    content=self._day_col,
+                ft.Row(
+                    controls=[
+                        cash_flow_panel,
+                        breakdown_panel,
+                    ],
+                    spacing=SPACE_MD,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                     expand=True,
                 ),
             ],
             spacing=SPACE_SM,
             expand=True,
-            scroll=ft.ScrollMode.AUTO,
         )
         self._mounted = True
         return self._root
@@ -178,6 +216,7 @@ class ReportView:
         self._flush_ui()
 
     def _rebuild_preset_row(self) -> None:
+        runtime = get_active_theme_runtime()
         chips = []
         for key, label in _PRESETS:
             active = self._active_preset == key
@@ -190,7 +229,7 @@ class ReportView:
                     label, size=12, weight=ft.FontWeight.W_600,
                     color=ft.Colors.ON_PRIMARY if active else ft.Colors.ON_SURFACE_VARIANT,
                 ),
-                bgcolor=ft.Colors.PRIMARY if active else ft.Colors.SURFACE_CONTAINER,
+                bgcolor=runtime.accent if active else ft.Colors.SURFACE_CONTAINER,
                 border_radius=RADIUS_SM,
                 padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=5),
                 on_click=on_click,
@@ -234,32 +273,36 @@ class ReportView:
             self._load_data()
             self._flush_ui()
 
-        return ft.Row(
-            controls=[
-                ft.Container(
-                    content=ft.Icon(ft.Icons.CHEVRON_LEFT, size=22),
-                    on_click=prev_month,
-                    ink=True, border_radius=RADIUS_SM,
-                    padding=ft.padding.all(SPACE_XS),
-                ),
-                ft.Text(
-                    fmt_month_year(self._month),
-                    size=16, weight=ft.FontWeight.W_700,
-                    expand=True, text_align=ft.TextAlign.CENTER,
-                ),
-                ft.Container(
-                    content=ft.Icon(
-                        ft.Icons.CHEVRON_RIGHT, size=22,
-                        color=ft.Colors.ON_SURFACE_VARIANT if future else None,
+        return ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Container(
+                        content=ft.Icon(ft.Icons.CHEVRON_LEFT, size=22),
+                        on_click=prev_month,
+                        ink=True, border_radius=RADIUS_SM,
+                        padding=ft.padding.all(SPACE_XS),
                     ),
-                    on_click=next_month,
-                    ink=not future,
-                    border_radius=RADIUS_SM,
-                    padding=ft.padding.all(SPACE_XS),
-                    opacity=0.35 if future else 1.0,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
+                    ft.Text(
+                        fmt_month_year(self._month),
+                        size=15, weight=ft.FontWeight.W_700,
+                        width=180, text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Container(
+                        content=ft.Icon(
+                            ft.Icons.CHEVRON_RIGHT, size=22,
+                            color=ft.Colors.ON_SURFACE_VARIANT if future else None,
+                        ),
+                        on_click=next_month,
+                        ink=not future,
+                        border_radius=RADIUS_SM,
+                        padding=ft.padding.all(SPACE_XS),
+                        opacity=0.35 if future else 1.0,
+                    ),
+                ],
+                spacing=SPACE_XS,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            width=260,
         )
 
     def _build_date_pickers(self) -> ft.Control:
@@ -343,26 +386,45 @@ class ReportView:
         with get_session() as session:
             self._data = build_report(session, self._start, self._end)
         self._build_summary_controls()
+        self._build_breakdown_controls()
         self._build_cat_controls()
         self._build_day_controls()
 
     def _build_summary_controls(self) -> None:
         d = self._data
+        runtime = get_active_theme_runtime()
         self._summary_row.controls = [
-            _scard("გაყიდვები",  str(d.summary.total_txns),
-                   ft.Icons.RECEIPT_LONG,      ACCENT_GOLD),
-            _scard("შემოსავალი", f"\u20be{d.summary.total_revenue:.2f}",
-                   ft.Icons.PAYMENTS,          ACCENT_GOLD),
-            _scard("გატანა",     f"\u20be{d.total_withdrawn:.2f}",
-                   ft.Icons.OUTPUT,            ft.Colors.ERROR),
-            _scard("სალაროში",   f"\u20be{d.net_cash:.2f}",
-                   ft.Icons.ACCOUNT_BALANCE,   ft.Colors.PRIMARY),
-            _scard("ნისია",      str(d.summary.open_credit_count),
-                   ft.Icons.ACCOUNT_BALANCE_WALLET, ft.Colors.ON_SURFACE_VARIANT),
+            _scard("საწყისი ნაშთი", f"\u20be{d.opening_balance:.2f}",
+                   ft.Icons.HISTORY_TOGGLE_OFF, runtime, width=170),
+            _scard("პერიოდის შემოსავალი", f"\u20be{d.summary.cashier_received:.2f}",
+                   ft.Icons.PAYMENTS, runtime,
+                   note="გაყიდვები + დაბრუნებული ნისია", width=220),
+            _scard("გატანები", f"\u20be{d.total_withdrawn:.2f}",
+                   ft.Icons.OUTPUT, runtime, danger=True, width=150),
+            _scard("ნეტო ცვლილება", f"\u20be{d.net_change:.2f}",
+                   ft.Icons.DIFFERENCE, runtime,
+                   note="შემოსავალი − გატანები", width=180),
+            _scard("საბოლოო ნაშთი", f"\u20be{d.closing_balance:.2f}",
+                   ft.Icons.ACCOUNT_BALANCE, runtime, highlight=True, width=180),
+            _scard("აქტიური ნისია", str(d.active_credit_count),
+                   ft.Icons.ACCOUNT_BALANCE_WALLET, runtime,
+                   note=f"\u20be{d.active_credit_amount:.2f}", width=160),
+        ]
+
+    def _build_breakdown_controls(self) -> None:
+        d = self._data
+        self._breakdown_col.controls = [
+            _kv_row("გაყიდვა ჯამში", f"{d.summary.total_txns} / \u20be{d.summary.total_revenue:.2f}"),
+            _kv_row("მიღებული გაყიდვებიდან", f"\u20be{d.sales_received:.2f}"),
+            _kv_row("ახალი ნისია", str(d.summary.new_credit_count)),
+            _kv_row("გადახდილი ნისია", f"{d.credit_repaid_count} / \u20be{d.credit_repaid:.2f}"),
+            _kv_row("ნაპატიები ნისია", f"{d.forgiven_count} / \u20be{d.forgiven_amount:.2f}"),
+            _kv_row("აქტიური ნისიის ნაშთი", f"{d.active_credit_count} / \u20be{d.active_credit_amount:.2f}"),
         ]
 
     def _build_cat_controls(self) -> None:
         cats = self._data.summary.categories
+        runtime = get_active_theme_runtime()
         if not cats:
             self._cat_col.controls = [
                 ft.Text("მონაცემი არ არის", size=12,
@@ -373,92 +435,67 @@ class ReportView:
         rows: list[ft.Control] = []
         for cs in cats:
             frac = float(cs.revenue / max_rev)
-            rows.append(ft.Row(
-                controls=[
-                    ft.Text(_CAT_LABEL.get(cs.category, cs.category.value),
-                            size=12, width=90,
-                            color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Stack(
+            rows.append(
+                ft.Container(
+                    content=ft.Column(
                         controls=[
-                            ft.Container(width=160, height=8,
-                                         bgcolor=ft.Colors.SURFACE_CONTAINER,
-                                         border_radius=4),
-                            ft.Container(width=max(4, int(160 * frac)), height=8,
-                                         bgcolor=ACCENT_GOLD, border_radius=4),
+                            ft.Row(
+                                controls=[
+                                    ft.Text(
+                                        _CAT_LABEL.get(cs.category, cs.category.value),
+                                        size=12,
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                        expand=True,
+                                    ),
+                                    ft.Text(
+                                        str(cs.qty), size=12, width=36,
+                                        text_align=ft.TextAlign.RIGHT,
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                    ),
+                                    ft.Text(
+                                        f"\u20be{cs.revenue:.2f}", size=12,
+                                        weight=ft.FontWeight.W_600, width=82,
+                                        text_align=ft.TextAlign.RIGHT,
+                                    ),
+                                ],
+                                spacing=SPACE_SM,
+                            ),
+                            ft.Stack(
+                                controls=[
+                                    ft.Container(height=5,
+                                                 bgcolor=_with_alpha(runtime.accent, 0.08),
+                                                 border_radius=3),
+                                    ft.Container(width=max(4, int(250 * frac)), height=5,
+                                                 bgcolor=runtime.accent, border_radius=3),
+                                ],
+                                height=5,
+                            ),
                         ],
-                        width=160, height=8,
+                        spacing=3,
+                        tight=True,
                     ),
-                    ft.Text(str(cs.qty), size=12, width=32,
-                            text_align=ft.TextAlign.RIGHT,
-                            color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text(f"\u20be{cs.revenue:.2f}", size=12,
-                            weight=ft.FontWeight.W_600, width=72,
-                            text_align=ft.TextAlign.RIGHT),
-                ],
-                spacing=SPACE_SM,
-            ))
+                    padding=ft.padding.symmetric(vertical=2),
+                )
+            )
         self._cat_col.controls = rows
 
     def _build_day_controls(self) -> None:
         days = self._data.days
         if not days:
             self._day_col.controls = [
-                ft.Text("ამ პერიოდში ჩანაწერი არ არის", size=13,
-                        color=ft.Colors.ON_SURFACE_VARIANT)
+                ft.Container(
+                    content=ft.Text("ამ პერიოდში ჩანაწერი არ არის", size=13,
+                                    color=ft.Colors.ON_SURFACE_VARIANT),
+                    bgcolor=ft.Colors.SURFACE_CONTAINER,
+                    border_radius=RADIUS_MD,
+                    padding=ft.padding.all(SPACE_MD),
+                )
             ]
             return
 
-        # header row
-        hdr = ft.Row(
-            controls=[
-                ft.Text("თარიღი",    size=11, width=130,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        weight=ft.FontWeight.W_600),
-                ft.Text("გაყ.",      size=11, width=36,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        text_align=ft.TextAlign.RIGHT,
-                        weight=ft.FontWeight.W_600),
-                ft.Text("შემოსავ.", size=11, width=80,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        text_align=ft.TextAlign.RIGHT,
-                        weight=ft.FontWeight.W_600),
-                ft.Text("გატანა",   size=11, width=72,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        text_align=ft.TextAlign.RIGHT,
-                        weight=ft.FontWeight.W_600),
-                ft.Text("სალარო",  size=11, width=72,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        text_align=ft.TextAlign.RIGHT,
-                        weight=ft.FontWeight.W_600),
-            ],
-            spacing=SPACE_SM,
-        )
-
-        rows: list[ft.Control] = [hdr, ft.Divider(height=1)]
+        rows: list[ft.Control] = [_cash_flow_header()]
         for ds in days:
-            net_color = ft.Colors.ERROR if ds.net < 0 else None
-            rows.append(ft.Row(
-                controls=[
-                    ft.Text(fmt_date(ds.date), size=12, width=130,
-                            color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text(str(ds.txn_count), size=12, width=36,
-                            text_align=ft.TextAlign.RIGHT),
-                    ft.Text(f"\u20be{ds.revenue:.2f}", size=12,
-                            weight=ft.FontWeight.W_600, width=80,
-                            text_align=ft.TextAlign.RIGHT),
-                    ft.Text(
-                        f"\u20be{ds.withdrawn:.2f}" if ds.withdrawn else "—",
-                        size=12, width=72,
-                        text_align=ft.TextAlign.RIGHT,
-                        color=ft.Colors.ERROR if ds.withdrawn else ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                    ft.Text(f"\u20be{ds.net:.2f}", size=12,
-                            weight=ft.FontWeight.W_600, width=72,
-                            text_align=ft.TextAlign.RIGHT,
-                            color=net_color),
-                ],
-                spacing=SPACE_SM,
-            ))
+            rows.append(_cash_flow_row(ds))
         self._day_col.controls = rows
 
     # ── export ────────────────────────────────────────────────────
@@ -471,17 +508,20 @@ class ReportView:
         buf = io.StringIO()
         w   = csv.writer(buf)
 
-        w.writerow(["ანგარიში"])
+        w.writerow(["ანგარიშები"])
         w.writerow([f"{fmt_short_date(d.start)} – {fmt_short_date(d.end)}"])
         w.writerow([])
 
         w.writerow(["შეჯამება"])
-        w.writerow(["გაყიდვები",  d.summary.total_txns])
-        w.writerow(["შემოსავალი", f"{d.summary.total_revenue:.2f}"])
-        w.writerow(["გატანა",     f"{d.total_withdrawn:.2f}"])
-        w.writerow(["სალაროში",   f"{d.net_cash:.2f}"])
-        w.writerow(["ღია ნისიები", d.summary.open_credit_count])
-        w.writerow(["ნისია (ჯამი)", f"{d.summary.open_credit_amount:.2f}"])
+        w.writerow(["საწყისი ნაშთი", f"{d.opening_balance:.2f}"])
+        w.writerow(["გაყიდვა ჯამში", f"{d.summary.total_txns} / {d.summary.total_revenue:.2f}"])
+        w.writerow(["მიღებული გაყიდვებიდან", f"{d.sales_received:.2f}"])
+        w.writerow(["გადახდილი ნისია", f"{d.credit_repaid_count} / {d.credit_repaid:.2f}"])
+        w.writerow(["პერიოდის შემოსავალი", f"{d.summary.cashier_received:.2f}"])
+        w.writerow(["გატანები", f"{d.total_withdrawn:.2f}"])
+        w.writerow(["ნეტო ცვლილება", f"{d.net_change:.2f}"])
+        w.writerow(["საბოლოო ნაშთი", f"{d.closing_balance:.2f}"])
+        w.writerow(["აქტიური ნისია", f"{d.active_credit_count} / {d.active_credit_amount:.2f}"])
         w.writerow([])
 
         w.writerow(["კატეგორიები"])
@@ -494,15 +534,25 @@ class ReportView:
             ])
         w.writerow([])
 
-        w.writerow(["დღეების მიხედვით"])
-        w.writerow(["თარიღი", "გაყ.", "შემოსავ.", "გატანა", "სალარო"])
+        w.writerow(["სალაროს მოძრაობა"])
+        w.writerow([
+            "თარიღი", "საწყისი ნაშთი", "გაყიდვებიდან მიღებული",
+            "დაბრუნებული ნისია", "შემოსავალი", "გატანა",
+            "ნეტო ცვლილება", "საბოლოო ნაშთი", "გაყიდვა ჯამში",
+            "ახალი ნისია",
+        ])
         for ds in d.days:
             w.writerow([
                 fmt_short_date(ds.date),
-                ds.txn_count,
-                f"{ds.revenue:.2f}",
+                f"{ds.opening_balance:.2f}",
+                f"{ds.sales_received:.2f}",
+                f"{ds.credit_repaid:.2f}",
+                f"{ds.income:.2f}",
                 f"{ds.withdrawn:.2f}",
-                f"{ds.net:.2f}",
+                f"{ds.net_change:.2f}",
+                f"{ds.closing_balance:.2f}",
+                f"{ds.txn_count} / {ds.sales_total:.2f}",
+                ds.new_credit_count,
             ])
 
         content  = buf.getvalue()
@@ -533,24 +583,150 @@ class ReportView:
         self._preset_row.update()
         self._period_ctrl.update()
         self._summary_row.update()
+        self._breakdown_col.update()
         self._cat_col.update()
         self._day_col.update()
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _scard(label: str, value: str, icon: str, icon_color) -> ft.Container:
+def _scard(
+    label: str,
+    value: str,
+    icon: str,
+    runtime,
+    *,
+    note: str | None = None,
+    highlight: bool = False,
+    danger: bool = False,
+    width: int = 170,
+) -> ft.Container:
+    color = "#D32F2F" if danger else runtime.accent
+    value_color = runtime.accent if highlight else ft.Colors.ERROR if danger else None
+    text_controls: list[ft.Control] = [
+        ft.Text(value, size=16, weight=ft.FontWeight.W_700, color=value_color),
+        ft.Text(label, size=10, color=runtime.muted_text, max_lines=2),
+    ]
+    if note:
+        text_controls.append(
+            ft.Text(note, size=8, color=runtime.muted_text,
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        )
     return ft.Container(
-        content=ft.Column(
+        content=ft.Row(
             controls=[
-                ft.Icon(icon, size=18, color=icon_color),
-                ft.Text(value, size=20, weight=ft.FontWeight.W_700),
-                ft.Text(label, size=11, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Container(
+                    content=ft.Icon(icon, size=14, color=color),
+                    bgcolor=_with_alpha(color, 0.10),
+                    border_radius=9,
+                    padding=ft.padding.all(SPACE_XS + 2),
+                ),
+                ft.Column(text_controls, spacing=1, tight=True, expand=True),
             ],
-            spacing=SPACE_XS, tight=True,
+            spacing=SPACE_SM,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        bgcolor=_with_alpha(runtime.accent, 0.08) if highlight else runtime.panel_bg,
+        border=ft.border.all(1, runtime.accent if highlight else runtime.panel_border),
+        border_radius=RADIUS_MD,
+        padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+        width=width,
+        height=66,
+    )
+
+
+def _kv_row(label: str, value: str) -> ft.Container:
+    return ft.Container(
+        content=ft.Row(
+            controls=[
+                ft.Text(label, size=12, color=ft.Colors.ON_SURFACE_VARIANT, expand=True),
+                ft.Text(value, size=12, weight=ft.FontWeight.W_700,
+                        text_align=ft.TextAlign.RIGHT),
+            ],
+            spacing=SPACE_SM,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=ft.Colors.SURFACE_CONTAINER,
-        border_radius=RADIUS_LG,
-        padding=ft.padding.all(SPACE_MD + 4),
-        width=150,
+        border_radius=RADIUS_MD,
+        padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
     )
+
+
+def _cash_flow_header() -> ft.Container:
+    return ft.Container(
+        content=ft.Row(
+            controls=[
+                _cell("თარიღი", 120, header=True, align=ft.TextAlign.LEFT),
+                _cell("საწყისი", 92, header=True),
+                _cell("გაყიდვ.", 92, header=True),
+                _cell("ნისია", 82, header=True),
+                _cell("შემოს.", 92, header=True),
+                _cell("გატანა", 82, header=True),
+                _cell("ნეტო", 82, header=True),
+                _cell("ნაშთი", 112, header=True),
+            ],
+            spacing=SPACE_XS,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=SPACE_XS),
+    )
+
+
+def _cash_flow_row(ds) -> ft.Container:
+    runtime = get_active_theme_runtime()
+    net_color = ft.Colors.ERROR if ds.net_change < 0 else runtime.accent
+    return ft.Container(
+        content=ft.Row(
+            controls=[
+                _cell(fmt_short_date(ds.date), 120, align=ft.TextAlign.LEFT,
+                      color=ft.Colors.ON_SURFACE_VARIANT),
+                _cell(_money(ds.opening_balance), 92),
+                _cell(_money(ds.sales_received), 92),
+                _cell(_money(ds.credit_repaid), 82),
+                _cell(_money(ds.income), 92, weight=ft.FontWeight.W_700),
+                _cell(_money(ds.withdrawn), 82,
+                      color=ft.Colors.ERROR if ds.withdrawn else ft.Colors.ON_SURFACE_VARIANT),
+                _cell(_money(ds.net_change), 82, color=net_color,
+                      weight=ft.FontWeight.W_700),
+                _cell(_money(ds.closing_balance), 112,
+                      weight=ft.FontWeight.W_700),
+            ],
+            spacing=SPACE_XS,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        bgcolor=_with_alpha(runtime.accent, 0.04),
+        border=ft.border.all(1, runtime.panel_border),
+        border_radius=RADIUS_MD,
+        padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=SPACE_SM),
+    )
+
+
+def _cell(
+    text: str,
+    width: int,
+    *,
+    header: bool = False,
+    align: ft.TextAlign = ft.TextAlign.RIGHT,
+    color=None,
+    weight=None,
+) -> ft.Text:
+    return ft.Text(
+        text,
+        size=11 if header else 12,
+        width=width,
+        color=color or ft.Colors.ON_SURFACE_VARIANT if header else color,
+        weight=ft.FontWeight.W_700 if header else weight,
+        text_align=align,
+        no_wrap=True,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+
+def _money(value: Decimal) -> str:
+    return f"\u20be{value:.2f}"
+
+
+def _with_alpha(color: str, alpha: float) -> str:
+    raw = color.lstrip("#")
+    pct = max(0, min(255, round(alpha * 255)))
+    return f"#{pct:02X}{raw.upper()}"

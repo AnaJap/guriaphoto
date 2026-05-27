@@ -48,6 +48,9 @@ _CAT_LABEL: dict[ProductCategory, str] = {
     ProductCategory.other:       "სხვა",
 }
 
+_TOP_HEADER_HEIGHT = 160
+_HEADER_CONTROL_HEIGHT = 38
+
 
 class TodayView:
     def __init__(self, page: ft.Page, user: User) -> None:
@@ -96,9 +99,11 @@ class TodayView:
         runtime = runtime or get_active_theme_runtime()
         expanded = self._tab == "entry"
         if self._tab == "cash":
-            # The cash tab renders its summary (date picker + cards) right in
-            # the header box, in place of the default "დღეს" title.
+            # Cash renders its date picker + cards in the header box.
             self._header_area.content = self._get_cash_view().build_summary(runtime)
+        elif self._tab == "history":
+            # History mirrors the cash layout: period controls + metrics above.
+            self._header_area.content = self._get_history_panel().build_summary(runtime)
         else:
             self._header_area.content = self._build_header_content(
                 clock.today(),
@@ -109,6 +114,7 @@ class TodayView:
         self._header_area.border = ft.border.all(1, runtime.panel_border)
         self._header_area.border_radius = RADIUS_LG + 4
         self._header_area.padding = ft.padding.all(SPACE_MD)
+        self._header_area.height = _TOP_HEADER_HEIGHT
 
         self._content_shell.bgcolor = runtime.panel_bg
         self._content_shell.border = ft.border.all(1, runtime.panel_border)
@@ -116,15 +122,31 @@ class TodayView:
         self._content_shell.padding = ft.padding.all(SPACE_LG if expanded else SPACE_MD)
 
     def _build_header_content(self, today: dt.date, runtime, *, expanded: bool) -> ft.Control:
-        title = ft.Column(
-            controls=[
-                ft.Text(fmt_date(today), size=12, color=runtime.muted_text),
-                ft.Text("დღეს", size=22 if expanded else 20, weight=ft.FontWeight.W_700),
-            ],
-            spacing=0,
-            tight=True,
+        date_pill = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED, size=15,
+                            color=runtime.accent),
+                    ft.Text(fmt_date(today), size=13, weight=ft.FontWeight.W_600),
+                ],
+                spacing=SPACE_XS,
+                tight=True,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+            tooltip="დღევანდელი თარიღი",
         )
-        controls: list[ft.Control] = [title]
+        title_row = ft.Row(
+            controls=[
+                ft.Text("ჟურნალი", size=22 if expanded else 20,
+                        weight=ft.FontWeight.W_700, expand=True),
+                date_pill,
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        controls: list[ft.Control] = [title_row]
         if expanded:
             controls.extend([ft.Container(height=SPACE_XS), self._stats_row])
         return ft.Column(controls=controls, spacing=SPACE_XS, tight=True)
@@ -149,18 +171,20 @@ class TodayView:
         cashier_income = sales_cash + credit_cash
         runtime = get_active_theme_runtime()
         return [
-            _stat_card("დღევანდელი გაყიდვები", str(len(txns)), ft.Icons.RECEIPT_LONG, runtime),
+            _stat_card("გაყიდვა ჯამში", str(len(txns)), ft.Icons.RECEIPT_LONG, runtime),
+            _stat_card("ახალი ნისია", str(len(new_credits)), ft.Icons.POST_ADD, runtime),
+            _stat_card("გადახდილი ნისია", str(len(credit_payments)), ft.Icons.REPLAY_CIRCLE_FILLED_OUTLINED, runtime),
+            _stat_card("აქტიური ნისია", str(len(open_credits)), ft.Icons.ACCOUNT_BALANCE_WALLET, runtime),
+            ft.Container(width=SPACE_LG),
             _stat_card(
-                "სალაროს შემოსავალი",
+                "დღის შემოსავალი",
                 f"\u20be{cashier_income:.2f}",
                 ft.Icons.PAYMENTS,
                 runtime,
-                note="გაყიდვებში მიღებული + დაბრუნებული ნისიები",
-                width=320,
+                note="გაყიდვები + დაბრუნებული ნისია",
+                highlight=True,
+                width=230,
             ),
-            _stat_card("ახალი ნისიები", str(len(new_credits)), ft.Icons.POST_ADD, runtime),
-            _stat_card("დაბრუნებული ნისიები", str(len(credit_payments)), ft.Icons.REPLAY_CIRCLE_FILLED_OUTLINED, runtime),
-            _stat_card("სულ აქტიური ნისიები", str(len(open_credits)), ft.Icons.ACCOUNT_BALANCE_WALLET, runtime),
         ]
 
     def refresh_stats(self) -> None:
@@ -193,6 +217,8 @@ class TodayView:
             # reflect any sales/credits made while on another tab.
             if k == "cash":
                 self._get_cash_view().refresh()
+            elif k == "history":
+                self._get_history_panel().reload_if_stale()
             self._sync_layout_chrome()
             if self._header_area.page is not None:
                 self._header_area.update()
@@ -329,8 +355,13 @@ class _HistoryPanel:
         self._preset_row  = ft.Row(spacing=SPACE_XS, wrap=True)
         self._from_label  = ft.Text("", size=13, weight=ft.FontWeight.W_600)
         self._to_label    = ft.Text("", size=13, weight=ft.FontWeight.W_600)
-        self._summary_row = ft.Row(spacing=SPACE_XS, run_spacing=SPACE_XS, wrap=True)
-        self._export_feedback = ft.Text("", size=11)
+        self._summary_row = ft.Row(
+            spacing=SPACE_XS,
+            run_spacing=SPACE_XS,
+            wrap=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+        )
+        self._export_feedback = ft.Text("", size=11, visible=False)
         self._cat_col     = ft.Column(spacing=3, tight=True)
         self._list_col    = ft.Column(spacing=SPACE_XS, scroll=ft.ScrollMode.AUTO, expand=True)
         self._list_count  = ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
@@ -342,79 +373,33 @@ class _HistoryPanel:
 
     # ── public ───────────────────────────────────────────────────────
 
+    def build_summary(self, runtime) -> ft.Control:
+        return ft.Column(
+            controls=[
+                ft.Row(
+                    controls=[
+                        ft.Text("ისტორია", size=22,
+                                weight=ft.FontWeight.W_700, expand=True),
+                        self._build_export_button(runtime),
+                        self._preset_row,
+                        self._build_date_row(runtime),
+                    ],
+                    spacing=SPACE_SM,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                self._export_feedback,
+                self._summary_row,
+            ],
+            spacing=SPACE_SM,
+            tight=True,
+        )
+
     def build(self) -> ft.Control:
         """Return (or re-return) the root Column. Call once after __init__."""
         runtime = get_active_theme_runtime()
-        from_btn = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED, size=14,
-                            color=runtime.accent),
-                    self._from_label,
-                ],
-                spacing=SPACE_XS,
-                tight=True,
-            ),
-            bgcolor=runtime.panel_bg,
-            border=ft.border.all(1, runtime.panel_border),
-            border_radius=RADIUS_MD,
-            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
-            on_click=lambda e: self._open_picker("start"),
-            ink=True,
-        )
-        to_btn = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED, size=14,
-                            color=runtime.accent),
-                    self._to_label,
-                ],
-                spacing=SPACE_XS,
-                tight=True,
-            ),
-            bgcolor=runtime.panel_bg,
-            border=ft.border.all(1, runtime.panel_border),
-            border_radius=RADIUS_MD,
-            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
-            on_click=lambda e: self._open_picker("end"),
-            ink=True,
-        )
-        date_row = ft.Row(
-            controls=[
-                from_btn,
-                ft.Text("–", size=16, color=ft.Colors.ON_SURFACE_VARIANT),
-                to_btn,
-            ],
-            spacing=SPACE_SM,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-
-        export_btn = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.FILE_DOWNLOAD_OUTLINED, size=16,
-                            color=ft.Colors.WHITE),
-                    ft.Text("Excel-ში ექსპორტი", size=13,
-                            weight=ft.FontWeight.W_600, color=ft.Colors.WHITE),
-                ],
-                spacing=SPACE_XS,
-                alignment=ft.MainAxisAlignment.CENTER,
-                tight=True,
-            ),
-            bgcolor=runtime.accent,
-            border_radius=RADIUS_MD,
-            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
-            on_click=self._on_export,
-            ink=True,
-        )
 
         filters = ft.Column(
             controls=[
-                self._preset_row,
-                date_row,
-                self._summary_row,
-                export_btn,
-                self._export_feedback,
                 ft.Text(
                     "კატეგორიები", size=11, weight=ft.FontWeight.W_600,
                     color=ft.Colors.ON_SURFACE_VARIANT,
@@ -431,7 +416,7 @@ class _HistoryPanel:
             border=ft.border.all(1, runtime.panel_border),
             border_radius=RADIUS_LG,
             padding=ft.padding.all(SPACE_MD),
-            width=330,
+            width=260,
         )
 
         transactions_panel = ft.Container(
@@ -473,6 +458,77 @@ class _HistoryPanel:
         )
         self._mounted = True
         return self._root
+
+    def _build_date_row(self, runtime) -> ft.Control:
+        from_btn = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED, size=14,
+                            color=runtime.accent),
+                    self._from_label,
+                ],
+                spacing=SPACE_XS,
+                tight=True,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+            height=_HEADER_CONTROL_HEIGHT,
+            alignment=ft.Alignment(0, 0),
+            on_click=lambda e: self._open_picker("start"),
+            ink=True,
+        )
+        to_btn = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED, size=14,
+                            color=runtime.accent),
+                    self._to_label,
+                ],
+                spacing=SPACE_XS,
+                tight=True,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+            height=_HEADER_CONTROL_HEIGHT,
+            alignment=ft.Alignment(0, 0),
+            on_click=lambda e: self._open_picker("end"),
+            ink=True,
+        )
+        return ft.Row(
+            controls=[
+                from_btn,
+                ft.Text("–", size=16, color=ft.Colors.ON_SURFACE_VARIANT),
+                to_btn,
+            ],
+            spacing=SPACE_SM,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _build_export_button(self, runtime) -> ft.Container:
+        return ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.FILE_DOWNLOAD_OUTLINED, size=16,
+                            color=ft.Colors.WHITE),
+                    ft.Text("Excel-ში ექსპორტი", size=13,
+                            weight=ft.FontWeight.W_600, color=ft.Colors.WHITE),
+                ],
+                spacing=SPACE_XS,
+                alignment=ft.MainAxisAlignment.CENTER,
+                tight=True,
+            ),
+            bgcolor=runtime.accent,
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+            height=_HEADER_CONTROL_HEIGHT,
+            alignment=ft.Alignment(0, 0),
+            on_click=self._on_export,
+            ink=True,
+        )
 
     def mark_stale(self) -> None:
         self._stale = True
@@ -557,8 +613,10 @@ class _HistoryPanel:
                 ),
                 bgcolor=runtime.accent if active else _with_alpha(runtime.accent, 0.08),
                 border=ft.border.all(1, _with_alpha(runtime.accent, 0.18) if not active else runtime.accent),
-                border_radius=RADIUS_SM,
-                padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=5),
+                border_radius=RADIUS_MD,
+                padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+                height=_HEADER_CONTROL_HEIGHT,
+                alignment=ft.Alignment(0, 0),
                 on_click=on_click,
                 ink=not active,
             ))
@@ -570,8 +628,10 @@ class _HistoryPanel:
                     color=ft.Colors.WHITE,
                 ),
                 bgcolor=runtime.accent,
-                border_radius=RADIUS_SM,
-                padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=5),
+                border_radius=RADIUS_MD,
+                padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+                height=_HEADER_CONTROL_HEIGHT,
+                alignment=ft.Alignment(0, 0),
             ))
         self._preset_row.controls = chips
 
@@ -628,6 +688,7 @@ class _HistoryPanel:
     def _set_export_feedback(self, message: str, *, error: bool = False) -> None:
         self._export_feedback.value = message
         self._export_feedback.color = ft.Colors.ERROR if error else ft.Colors.PRIMARY
+        self._export_feedback.visible = bool(message)
         if self._mounted and self._export_feedback.page is not None:
             self._export_feedback.update()
 
@@ -655,29 +716,37 @@ class _HistoryPanel:
         runtime = get_active_theme_runtime()
         self._summary_row.controls = [
             _history_metric(
-                "სულ გაყიდვები", str(s.total_txns),
+                "გაყიდვა ჯამში", str(s.total_txns),
                 ft.Icons.RECEIPT_LONG, runtime,
+                width=128,
+            ),
+            _history_metric(
+                "ახალი ნისია", str(s.new_credit_count),
+                ft.Icons.POST_ADD, runtime,
+                width=128,
             ),
             _history_metric(
                 "ჯამური გაყიდვები", f"₾{s.total_revenue:.2f}",
                 ft.Icons.SHOPPING_CART_OUTLINED, runtime,
+                width=150,
             ),
             _history_metric(
                 "მიღებული გაყიდვებიდან", f"₾{s.received_from_sales:.2f}",
                 ft.Icons.PAYMENTS, runtime,
+                width=172,
             ),
             _history_metric(
                 "დაბრუნებული ნისიები", f"₾{s.credit_received_amount:.2f}",
                 ft.Icons.REPLAY_CIRCLE_FILLED_OUTLINED, runtime,
+                width=162,
             ),
+            ft.Container(width=SPACE_LG),
             _history_metric(
-                "ახალი ნისიები", str(s.new_credit_count),
-                ft.Icons.POST_ADD, runtime,
-            ),
-            _history_metric(
-                "სალაროში მიღებული", f"₾{s.cashier_received:.2f}",
-                ft.Icons.ACCOUNT_BALANCE_WALLET, runtime,
+                "დღის შემოსავალი", f"₾{s.cashier_received:.2f}",
+                ft.Icons.PAYMENTS, runtime,
                 highlight=True,
+                note="გაყიდვები + დაბრუნებული ნისია",
+                width=230,
             ),
         ]
 
@@ -694,34 +763,34 @@ class _HistoryPanel:
                 controls=[
                     ft.Text(
                         _CAT_LABEL.get(cs.category, cs.category.value),
-                        size=11, width=74,
+                        size=11, width=66,
                         color=ft.Colors.ON_SURFACE_VARIANT,
                         overflow=ft.TextOverflow.ELLIPSIS,
                     ),
                     ft.Stack(
                         controls=[
                             ft.Container(
-                                width=88, height=7,
+                                width=62, height=7,
                                 bgcolor=_with_alpha(runtime.accent, 0.10),
                                 border_radius=4,
                             ),
                             ft.Container(
-                                width=max(4, int(88 * bar_frac)),
+                                width=max(4, int(62 * bar_frac)),
                                 height=7,
                                 bgcolor=runtime.accent,
                                 border_radius=4,
                             ),
                         ],
-                        width=88, height=7,
+                        width=62, height=7,
                     ),
                     ft.Text(
-                        str(cs.qty), size=11, width=24,
+                        str(cs.qty), size=11, width=22,
                         text_align=ft.TextAlign.RIGHT,
                         color=ft.Colors.ON_SURFACE_VARIANT,
                     ),
                     ft.Text(
                         f"\u20be{cs.revenue:.2f}", size=11,
-                        weight=ft.FontWeight.W_600, width=54,
+                        weight=ft.FontWeight.W_600, width=52,
                         text_align=ft.TextAlign.RIGHT,
                     ),
                 ],
@@ -1070,25 +1139,25 @@ def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
         )
         credit_badges = [
             ft.Container(
-                content=ft.Text(badge_text, size=11, weight=ft.FontWeight.W_600,
+                content=ft.Text(badge_text, size=10, weight=ft.FontWeight.W_600,
                                 color=ft.Colors.WHITE),
                 bgcolor=badge_color,
                 border_radius=RADIUS_SM,
-                padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=3),
+                padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=2),
             )
         ]
 
     return ft.Container(
         content=ft.Row(
             controls=[
-                ft.Text(time_str, size=11, color=ft.Colors.ON_SURFACE_VARIANT, width=38),
+                ft.Text(time_str, size=10, color=ft.Colors.ON_SURFACE_VARIANT, width=34),
                 ft.Column(
                     controls=[
-                        ft.Text(d.txn.customer_surname, size=15,
+                        ft.Text(d.txn.customer_surname, size=14,
                                 weight=ft.FontWeight.W_600),
                         ft.Text(
                             item_summary or "—",
-                            size=11,
+                            size=10,
                             color=runtime.muted_text,
                             max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,
@@ -1102,31 +1171,31 @@ def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
                     controls=[
                         ft.Text(
                             f"\u20be{d.total:.2f}",
-                            size=15,
+                            size=14,
                             weight=ft.FontWeight.W_700,
                             text_align=ft.TextAlign.RIGHT,
                         ),
                         ft.Text(
                             f"მიღ. \u20be{d.txn.amount_received:.2f}",
-                            size=10,
+                            size=9,
                             color=runtime.muted_text,
                             text_align=ft.TextAlign.RIGHT,
                         ),
                     ],
                     spacing=0,
                     tight=True,
-                    width=94,
+                    width=88,
                     horizontal_alignment=ft.CrossAxisAlignment.END,
                 ),
                 *credit_badges,
             ],
-            spacing=SPACE_SM,
+            spacing=SPACE_XS,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=runtime.panel_bg,
         border=ft.border.all(1, runtime.panel_border),
         border_radius=RADIUS_MD,
-        padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+        padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=6),
     )
 
 
@@ -1160,20 +1229,22 @@ def _stat_card(
     runtime=None,
     *,
     note: str | None = None,
+    highlight: bool = False,
     width: int = 186,
 ) -> ft.Container:
     runtime = runtime or get_active_theme_runtime()
+    value_color = runtime.accent if highlight else None
     text_controls: list[ft.Control] = [
-        ft.Text(value, size=18, weight=ft.FontWeight.W_700),
-        ft.Text(label, size=11, color=runtime.muted_text, max_lines=2),
+        ft.Text(value, size=17, weight=ft.FontWeight.W_700, color=value_color),
+        ft.Text(label, size=10, color=runtime.muted_text, max_lines=2),
     ]
     if note:
         text_controls.append(
             ft.Text(
                 note,
-                size=9,
+                size=8,
                 color=runtime.muted_text,
-                max_lines=2,
+                max_lines=1,
                 overflow=ft.TextOverflow.ELLIPSIS,
             )
         )
@@ -1181,7 +1252,7 @@ def _stat_card(
         content=ft.Row(
             controls=[
                 ft.Container(
-                    content=ft.Icon(icon, size=15, color=runtime.accent),
+                    content=ft.Icon(icon, size=14, color=runtime.accent),
                     bgcolor=_with_alpha(runtime.accent, 0.10),
                     border_radius=9,
                     padding=ft.padding.all(SPACE_XS + 2),
@@ -1196,12 +1267,12 @@ def _stat_card(
             spacing=SPACE_SM,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        bgcolor=runtime.panel_bg,
-        border=ft.border.all(1, runtime.panel_border),
+        bgcolor=_with_alpha(runtime.accent, 0.08) if highlight else runtime.panel_bg,
+        border=ft.border.all(1, runtime.accent if highlight else runtime.panel_border),
         border_radius=RADIUS_MD,
         padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
         width=width,
-        height=74,
+        height=66,
     )
 
 
@@ -1212,22 +1283,35 @@ def _history_metric(
     runtime=None,
     *,
     highlight: bool = False,
+    note: str | None = None,
+    width: int = 138,
 ) -> ft.Container:
     runtime = runtime or get_active_theme_runtime()
     value_color = runtime.accent if highlight else None
+    text_controls: list[ft.Control] = [
+        ft.Text(value, size=14, weight=ft.FontWeight.W_700,
+                color=value_color),
+        ft.Text(
+            label, size=10, color=runtime.muted_text,
+            max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+    ]
+    if note:
+        text_controls.append(
+            ft.Text(
+                note,
+                size=8,
+                color=runtime.muted_text,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
     return ft.Container(
         content=ft.Row(
             controls=[
                 ft.Icon(icon, size=14, color=runtime.accent),
                 ft.Column(
-                    controls=[
-                        ft.Text(value, size=15, weight=ft.FontWeight.W_700,
-                                color=value_color),
-                        ft.Text(
-                            label, size=10, color=runtime.muted_text,
-                            max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                    ],
+                    controls=text_controls,
                     spacing=0,
                     tight=True,
                     expand=True,
@@ -1242,7 +1326,8 @@ def _history_metric(
         ),
         border_radius=RADIUS_MD,
         padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=SPACE_SM),
-        width=138,
+        width=width,
+        height=66,
     )
 
 

@@ -9,6 +9,7 @@ from sqlmodel import Session, func, select
 from kodak.access import require_write_access
 from kodak.models.price_history import ProductPriceHistory
 from kodak.models.product import Product
+from kodak.models.product_status_history import ProductStatusHistory
 from kodak.models.transaction import LineItem
 from kodak.models.user import User
 
@@ -58,6 +59,25 @@ def record_price_change(
     )
 
 
+def record_status_change(
+    session: Session,
+    product_id: int,
+    old_active: bool,
+    new_active: bool,
+    changed_by_user_id: int | None = None,
+) -> None:
+    """Write a ProductStatusHistory row. Call before mutating the product."""
+    require_write_access()
+    session.add(
+        ProductStatusHistory(
+            product_id=product_id,
+            old_active=old_active,
+            new_active=new_active,
+            changed_by_user_id=changed_by_user_id,
+        )
+    )
+
+
 def product_usage_count(session: Session, product_id: int) -> int:
     """Return the number of LineItems that reference this product."""
     return session.exec(
@@ -65,7 +85,9 @@ def product_usage_count(session: Session, product_id: int) -> int:
     ).one()
 
 
-def delete_product(session: Session, product_id: int) -> str:
+def delete_product(
+    session: Session, product_id: int, changed_by_user_id: int | None = None
+) -> str:
     """Delete a product.
 
     - If it has been sold at least once: marks inactive (soft delete).
@@ -79,6 +101,14 @@ def delete_product(session: Session, product_id: int) -> str:
         return "not_found"
 
     if product_usage_count(session, product_id) > 0:
+        if product.active:
+            record_status_change(
+                session,
+                product_id=product.id,
+                old_active=True,
+                new_active=False,
+                changed_by_user_id=changed_by_user_id,
+            )
         product.active = False
         product.updated_at = dt.datetime.now(dt.UTC)
         session.add(product)

@@ -26,10 +26,10 @@ from kodak.ui.theme import (
 from kodak.ui.today_view import TodayView
 
 _NAV = [
-    ("დღეს",        ft.Icons.TODAY_OUTLINED,                  ft.Icons.TODAY),
+    ("ჟურნალი",     ft.Icons.TODAY_OUTLINED,                  ft.Icons.TODAY),
     ("ნისია",       ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.Icons.ACCOUNT_BALANCE_WALLET),
     ("პროდუქტები",  ft.Icons.PHOTO_CAMERA_OUTLINED,           ft.Icons.PHOTO_CAMERA),
-    ("ანგარიში",    ft.Icons.BAR_CHART_OUTLINED,              ft.Icons.BAR_CHART),
+    ("ანგარიშები",  ft.Icons.BAR_CHART_OUTLINED,              ft.Icons.BAR_CHART),
     ("დეშბორდები",  ft.Icons.DASHBOARD_OUTLINED,              ft.Icons.DASHBOARD),
     ("პარამეტრები", ft.Icons.SETTINGS_OUTLINED,               ft.Icons.SETTINGS),
 ]
@@ -62,6 +62,7 @@ class AppShell:
         # controls are not duplicated on every navigation visit.
         self._today_view:  TodayView | None  = None
         self._credits_view: CreditsView | None = None
+        self._products_view: ProductsView | None = None
         self._report_view: "ReportView | None" = None  # type: ignore[name-defined]
         self._dashboard_view: DashboardView | None = None
         self._settings_view: SettingsView | None = None
@@ -109,6 +110,11 @@ class AppShell:
         if self._credits_view is None:
             self._credits_view = CreditsView(page=self._page, user=self._user)
         return self._credits_view
+
+    def _get_products_view(self) -> ProductsView:
+        if self._products_view is None:
+            self._products_view = ProductsView(page=self._page, user=self._user)
+        return self._products_view
 
     def _get_report_view(self):
         if self._report_view is None:
@@ -299,7 +305,7 @@ class AppShell:
         elif index == 1:
             self._content_area.content = self._get_credits_view().build()
         elif index == 2:
-            self._content_area.content = ProductsView(user=self._user).build()
+            self._content_area.content = self._get_products_view().build()
         elif index == 3:
             self._content_area.content = self._get_report_view().build()
         elif index == 4:

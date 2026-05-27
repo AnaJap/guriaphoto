@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
+from pathlib import Path
 
 import flet as ft
 
+from kodak import clock
 from kodak.access import is_read_only
 from kodak.db import get_session
 from kodak.models.enums import ProductCategory, Role
 from kodak.models.product import Product
 from kodak.models.user import User
+from kodak.services.export import export_products_group_to_xlsx
 from kodak.services.pricing import list_active_products
 from kodak.services.products import (
     delete_product,
@@ -19,6 +22,7 @@ from kodak.services.products import (
     list_all_products_admin,
     product_usage_count,
     record_price_change,
+    record_status_change,
     save_product,
 )
 from kodak.ui.geo import fmt_short_date
@@ -46,20 +50,38 @@ _CAT_LABEL: dict[ProductCategory, str] = {
 
 
 class ProductsView:
-    def __init__(self, user: User) -> None:
+    def __init__(self, page: ft.Page, user: User) -> None:
+        self._page = page
         self._user = user
         self._can_write = not is_read_only()
         self._is_admin = user.role == Role.admin and self._can_write
         self._products: list[Product] = []
         self._selected_id: int | None = None   # None = nothing, -1 = adding new
         self._filter_cat: ProductCategory | None = None
+        self._export_cat: ProductCategory | None = None
 
         self._cat_row = ft.Row(spacing=SPACE_XS, scroll=ft.ScrollMode.AUTO)
         self._list_col = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
         self._detail_area = ft.Container(expand=True)
+        self._export_picker = ft.FilePicker()
+        self._page.services.append(self._export_picker)
+        self._export_feedback = ft.Text("", size=11, visible=False)
+        self._export_dropdown = ft.Dropdown(
+            value="all",
+            label="ექსპორტის ჯგუფი",
+            text_size=12,
+            dense=True,
+            filled=True,
+            fill_color=ft.Colors.SURFACE_CONTAINER,
+            border_radius=RADIUS_MD,
+            content_padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=2),
+            width=210,
+            on_select=self._on_export_group_selected,
+        )
 
         self._load()
         self._rebuild_cat_row()
+        self._rebuild_export_options()
         self._rebuild_list()
         self._detail_area.content = self._empty_detail()
 
@@ -97,8 +119,8 @@ class ProductsView:
                 spacing=SPACE_SM,
                 expand=True,
             ),
-            width=360,
-            padding=ft.padding.only(right=SPACE_LG),
+            width=500,
+            padding=ft.padding.only(right=SPACE_MD),
         )
 
         return ft.Column(
@@ -106,11 +128,15 @@ class ProductsView:
                 ft.Row(
                     controls=[
                         ft.Text("პროდუქტები", size=28, weight=ft.FontWeight.W_700),
+                        ft.Container(expand=True),
+                        self._export_dropdown,
+                        self._build_export_button(),
                         *add_btn,
                     ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    spacing=SPACE_SM,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
+                self._export_feedback,
                 ft.Container(height=SPACE_MD),
                 ft.Row(
                     controls=[
@@ -119,7 +145,7 @@ class ProductsView:
                         ft.Container(
                             content=self._detail_area,
                             expand=True,
-                            padding=ft.padding.only(left=SPACE_LG),
+                            padding=ft.padding.only(left=SPACE_MD),
                         ),
                     ],
                     expand=True,
@@ -139,6 +165,91 @@ class ProductsView:
             else:
                 self._products = list_active_products(session)
 
+    # ──────────────────────────────────────────── export
+
+    def _rebuild_export_options(self) -> None:
+        seen: list[ProductCategory] = []
+        for p in self._products:
+            if p.category not in seen:
+                seen.append(p.category)
+        self._export_dropdown.options = [
+            ft.dropdown.Option(key="all", text="ყველა ჯგუფი"),
+            *[
+                ft.dropdown.Option(
+                    key=cat.value,
+                    text=_CAT_LABEL.get(cat, cat.value.title()),
+                )
+                for cat in seen
+            ],
+        ]
+        valid_values = {"all", *(cat.value for cat in seen)}
+        current_value = "all" if self._export_cat is None else self._export_cat.value
+        if current_value not in valid_values:
+            self._export_cat = None
+            current_value = "all"
+        self._export_dropdown.value = current_value
+
+    def _on_export_group_selected(self, e) -> None:
+        value = e.control.value
+        self._export_cat = None if value == "all" else ProductCategory(value)
+
+    def _build_export_button(self) -> ft.Container:
+        return ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.FILE_DOWNLOAD_OUTLINED, size=15,
+                            color=ft.Colors.WHITE),
+                    ft.Text("Excel", size=13, weight=ft.FontWeight.W_600,
+                            color=ft.Colors.WHITE),
+                ],
+                spacing=SPACE_XS,
+                tight=True,
+            ),
+            bgcolor=ACCENT_GOLD,
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+            on_click=self._on_export,
+            ink=True,
+        )
+
+    def _on_export(self, e) -> None:
+        self._page.run_task(self._export_excel)
+
+    async def _export_excel(self) -> None:
+        category = self._export_cat
+        slug = "all" if category is None else category.value
+        default_name = f"kodak_products_{slug}_{clock.today():%Y-%m-%d}.xlsx"
+        try:
+            target = await self._export_picker.save_file(
+                dialog_title="შეინახეთ Excel ფაილი",
+                file_name=default_name,
+                allowed_extensions=["xlsx"],
+            )
+        except Exception as exc:
+            self._set_export_feedback(f"ექსპორტი ვერ მოხერხდა: {exc}", error=True)
+            return
+        if not target:
+            return
+
+        path = Path(target).expanduser()
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+        try:
+            export_products_group_to_xlsx(path, category=category)
+        except Exception as exc:
+            self._set_export_feedback(f"ექსპორტი ვერ მოხერხდა: {exc}", error=True)
+            return
+        self._set_export_feedback(f"შეინახა: {path.name}", error=False)
+
+    def _set_export_feedback(self, message: str, *, error: bool) -> None:
+        self._export_feedback.value = message
+        self._export_feedback.color = ft.Colors.ERROR if error else ft.Colors.PRIMARY
+        self._export_feedback.visible = True
+        try:
+            self._export_feedback.update()
+        except AssertionError:
+            pass
+
     # ──────────────────────────────────────────── category tabs
 
     def _rebuild_cat_row(self) -> None:
@@ -156,10 +267,13 @@ class ProductsView:
 
         def on_click(e, c=cat):
             self._filter_cat = c
+            self._export_cat = c
+            self._export_dropdown.value = c.value if c is not None else "all"
             self._rebuild_cat_row()
             self._rebuild_list()
             self._cat_row.update()
             self._list_col.update()
+            self._export_dropdown.update()
 
         return ft.Container(
             content=ft.Text(
@@ -332,6 +446,8 @@ class ProductsView:
             value=product.name if product else "",
             border_radius=RADIUS_MD,
             text_size=14,
+            dense=True,
+            content_padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
             expand=True,
         )
         size_field = ft.TextField(
@@ -339,6 +455,8 @@ class ProductsView:
             value=product.size_label or "" if product else "",
             border_radius=RADIUS_MD,
             text_size=14,
+            dense=True,
+            content_padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
             expand=True,
         )
         price_field = ft.TextField(
@@ -347,6 +465,8 @@ class ProductsView:
             border_radius=RADIUS_MD,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_size=14,
+            dense=True,
+            content_padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
             expand=True,
         )
 
@@ -451,6 +571,14 @@ class ProductsView:
                             new_price=price,
                             changed_by_user_id=self._user.id,
                         )
+                    if p.active != active_state[0]:
+                        record_status_change(
+                            session,
+                            product_id=p.id,
+                            old_active=p.active,
+                            new_active=active_state[0],
+                            changed_by_user_id=self._user.id,
+                        )
                     p.category = edit_cat[0]
                     p.name = name
                     p.size_label = size_field.value.strip() or None
@@ -462,8 +590,10 @@ class ProductsView:
             # Refresh the detail panel to show updated price history
             self._load()
             self._rebuild_cat_row()
+            self._rebuild_export_options()
             self._rebuild_list()
             self._cat_row.update()
+            self._export_dropdown.update()
             self._list_col.update()
             feedback.color = ft.Colors.PRIMARY
             feedback.value = "შენახულია ✓"
@@ -501,12 +631,16 @@ class ProductsView:
 
         def on_confirm_delete(e) -> None:
             with get_session() as session:
-                result = delete_product(session, product.id)
+                result = delete_product(
+                    session, product.id, changed_by_user_id=self._user.id
+                )
             self._selected_id = None
             self._load()
             self._rebuild_cat_row()
+            self._rebuild_export_options()
             self._rebuild_list()
             self._cat_row.update()
+            self._export_dropdown.update()
             self._list_col.update()
             msg = "გამორთულია ✓" if result == "deactivated" else "წაშლილია ✓"
             self._detail_area.content = self._empty_detail()
@@ -567,28 +701,27 @@ class ProductsView:
                 *history_rows,
             ]
 
-        return ft.Column(
+        form = ft.Column(
             controls=[
-                ft.Text(title, size=20, weight=ft.FontWeight.W_700),
-                ft.Container(height=SPACE_XS),
+                ft.Text(title, size=18, weight=ft.FontWeight.W_700),
                 ft.Text("კატეგორია", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
                 cat_chip_row,
-                ft.Row(controls=[name_field]),
-                ft.Row(controls=[size_field]),
-                ft.Row(controls=[price_field]),
-                active_row,
-                ft.Container(height=SPACE_XS),
+                ft.Row(controls=[name_field, size_field], spacing=SPACE_SM),
+                ft.Row(
+                    controls=[price_field, ft.Container(content=active_row, width=180)],
+                    spacing=SPACE_SM,
+                ),
                 ft.Row(
                     controls=[
                         ft.Container(
                             content=ft.Text(
-                                "შენახვა", size=14, weight=ft.FontWeight.W_600,
+                                "შენახვა", size=13, weight=ft.FontWeight.W_600,
                                 color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER,
                             ),
                             bgcolor=ACCENT_GOLD,
                             border_radius=RADIUS_MD,
                             padding=ft.padding.symmetric(
-                                horizontal=SPACE_LG, vertical=SPACE_MD),
+                                horizontal=SPACE_LG, vertical=SPACE_SM),
                             alignment=ft.Alignment(0, 0),
                             on_click=on_save,
                             ink=True,
@@ -596,14 +729,14 @@ class ProductsView:
                         ),
                         ft.Container(
                             content=ft.Text(
-                                "გაუქმება", size=14,
+                                "გაუქმება", size=13,
                                 color=ft.Colors.ON_SURFACE_VARIANT,
                                 text_align=ft.TextAlign.CENTER,
                             ),
                             border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
                             border_radius=RADIUS_MD,
                             padding=ft.padding.symmetric(
-                                horizontal=SPACE_LG, vertical=SPACE_MD),
+                                horizontal=SPACE_LG, vertical=SPACE_SM),
                             alignment=ft.Alignment(0, 0),
                             on_click=on_cancel,
                             ink=True,
@@ -619,4 +752,10 @@ class ProductsView:
             ],
             spacing=SPACE_SM,
             scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
+        return ft.Container(
+            content=form,
+            width=640,
+            expand=True,
         )

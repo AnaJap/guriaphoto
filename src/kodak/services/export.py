@@ -17,7 +17,9 @@ from kodak.db import get_session
 from kodak.models.cash import CashWithdrawal
 from kodak.models.credit import Credit, CreditPayment
 from kodak.models.enums import CreditStatus, ProductCategory
+from kodak.models.price_history import ProductPriceHistory
 from kodak.models.product import Product
+from kodak.models.product_status_history import ProductStatusHistory
 from kodak.models.user import User
 from kodak.services.history import RangeSummary, TxnDetail, list_range_transactions
 
@@ -389,6 +391,131 @@ def export_all_to_xlsx(path: Path) -> Path:
     return path
 
 
+def export_products_group_to_xlsx(
+    path: Path, *, category: ProductCategory | None = None
+) -> Path:
+    """Export current prices and price/status changes for one product group."""
+    path = Path(path)
+    with get_session() as session:
+        query = select(Product).order_by(Product.sort_order, Product.name)
+        if category is not None:
+            query = query.where(Product.category == category)
+        products = list(session.exec(query).all())
+        product_ids = [p.id for p in products if p.id is not None]
+
+        price_logs: list[ProductPriceHistory] = []
+        status_logs: list[ProductStatusHistory] = []
+        if product_ids:
+            price_logs = list(
+                session.exec(
+                    select(ProductPriceHistory)
+                    .where(ProductPriceHistory.product_id.in_(product_ids))
+                    .order_by(ProductPriceHistory.changed_at)
+                ).all()
+            )
+            status_logs = list(
+                session.exec(
+                    select(ProductStatusHistory)
+                    .where(ProductStatusHistory.product_id.in_(product_ids))
+                    .order_by(ProductStatusHistory.changed_at)
+                ).all()
+            )
+
+        user_ids = {
+            row.changed_by_user_id
+            for row in [*price_logs, *status_logs]
+            if row.changed_by_user_id
+        }
+        users: dict[int, User] = {}
+        if user_ids:
+            users = {
+                u.id: u
+                for u in session.exec(select(User).where(User.id.in_(user_ids))).all()
+            }
+
+    product_by_id = {p.id: p for p in products if p.id is not None}
+    group_name = "ყველა ჯგუფი" if category is None else _CAT_LABEL.get(category, category.value)
+
+    def product_label(product_id: int) -> str:
+        product = product_by_id.get(product_id)
+        if product is None:
+            return "—"
+        return f"{product.name} {product.size_label or ''}".strip()
+
+    def user_name(user_id: int | None) -> str:
+        user = users.get(user_id)
+        return user.full_name if user else "—"
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "მიმდინარე ფასები"
+    _write_table(
+        ws,
+        [
+            ("ჯგუფი", 16, _LEFT), ("დასახელება", 28, _LEFT),
+            ("ზომა", 14, _LEFT), ("ფასი", 12, _RIGHT),
+            ("სტატუსი", 12, _LEFT), ("განახლდა", 18, _LEFT),
+        ],
+        [
+            [
+                _CAT_LABEL.get(p.category, p.category.value),
+                p.name,
+                p.size_label or "",
+                _money(p.unit_price),
+                _active_label(p.active),
+                clock.to_local(p.updated_at).strftime("%d.%m.%Y %H:%M"),
+            ]
+            for p in products
+        ],
+        money_cols={4},
+    )
+    ws.cell(row=1, column=8, value="ჯგუფი:").font = _LABEL_FONT
+    ws.cell(row=1, column=9, value=group_name).font = _VALUE_FONT
+
+    log_rows: list[tuple[dt.datetime, list]] = []
+    for row in price_logs:
+        log_rows.append((
+            row.changed_at,
+            [
+                clock.to_local(row.changed_at).strftime("%d.%m.%Y"),
+                clock.to_local(row.changed_at).strftime("%H:%M"),
+                product_label(row.product_id),
+                "ფასი",
+                f"₾{_money(row.old_price):.2f}",
+                f"₾{_money(row.new_price):.2f}",
+                user_name(row.changed_by_user_id),
+            ],
+        ))
+    for row in status_logs:
+        log_rows.append((
+            row.changed_at,
+            [
+                clock.to_local(row.changed_at).strftime("%d.%m.%Y"),
+                clock.to_local(row.changed_at).strftime("%H:%M"),
+                product_label(row.product_id),
+                "სტატუსი",
+                _active_label(row.old_active),
+                _active_label(row.new_active),
+                user_name(row.changed_by_user_id),
+            ],
+        ))
+
+    _write_table(
+        wb.create_sheet("ცვლილებების ჟურნალი"),
+        [
+            ("თარიღი", 12, _LEFT), ("დრო", 8, _LEFT),
+            ("პროდუქტი", 30, _LEFT), ("ცვლილება", 12, _LEFT),
+            ("ძველი", 14, _LEFT), ("ახალი", 14, _LEFT),
+            ("მომხმარებელი", 18, _LEFT),
+        ],
+        [row for _changed_at, row in sorted(log_rows, key=lambda item: item[0])],
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(str(path))
+    return path
+
+
 def _fill_transactions_sheet(ws: Worksheet, rows: list[TxnDetail]) -> None:
     ws.sheet_view.showGridLines = False
     _apply_column_widths(ws)
@@ -430,3 +557,7 @@ def _write_table(
             c.font = _LABEL_FONT
             if col in money_cols and value is not None:
                 c.number_format = _MONEY_FMT
+
+
+def _active_label(active: bool) -> str:
+    return "აქტიური" if active else "გამორთული"

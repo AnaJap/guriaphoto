@@ -6,6 +6,7 @@ when ``kodak.db.init_db()`` imports this package.
 
 from kodak.models.cash import CashWithdrawal
 from kodak.models.price_history import ProductPriceHistory
+from kodak.models.product_status_history import ProductStatusHistory
 from kodak.models.credit import Credit, CreditPayment
 from kodak.models.enums import CreditStatus, ProductCategory, Role, StockCategory
 from kodak.models.product import Product
@@ -17,6 +18,7 @@ from kodak.models.user import User
 __all__ = [
     "CashWithdrawal",
     "ProductPriceHistory",
+    "ProductStatusHistory",
     "Credit",
     "CreditPayment",
     "CreditStatus",

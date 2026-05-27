@@ -252,6 +252,7 @@ def list_credits_by_filter(
     *,
     start_date: dt.date | None = None,
     end_date: dt.date | None = None,
+    date_filter: str = "opened",
     search: str = "",
 ) -> list[Credit]:
     """Return credits matching *status_filter*.
@@ -276,10 +277,21 @@ def list_credits_by_filter(
     elif status_filter == "forgiven":
         q = q.where(Credit.status == CreditStatus.forgiven)
 
-    if start_date is not None:
-        q = q.where(Credit.date >= start_date)
-    if end_date is not None:
-        q = q.where(Credit.date <= end_date)
+    if date_filter == "payment" and (start_date is not None or end_date is not None):
+        payment_q = select(CreditPayment.credit_id)
+        if start_date is not None:
+            payment_q = payment_q.where(CreditPayment.date >= start_date)
+        if end_date is not None:
+            payment_q = payment_q.where(CreditPayment.date <= end_date)
+        credit_ids = list(session.exec(payment_q).all())
+        if not credit_ids:
+            return []
+        q = q.where(Credit.id.in_(credit_ids))
+    else:
+        if start_date is not None:
+            q = q.where(Credit.date >= start_date)
+        if end_date is not None:
+            q = q.where(Credit.date <= end_date)
 
     query = search.strip()
     if query:

@@ -58,6 +58,11 @@ _FILTER_META = {
     "forgiven": ("ნაპატიები",   "ნაპატიები ნისია"),
 }
 
+_DATE_FILTER_META = {
+    "opened":  "გახსნის თარიღი",
+    "payment": "გადახდის თარიღი",
+}
+
 
 class CreditsView:
     def __init__(self, page: ft.Page, user: User) -> None:
@@ -70,6 +75,7 @@ class CreditsView:
         self._search_query: str = ""
         self._start_date: dt.date | None = None
         self._end_date: dt.date | None = None
+        self._date_filter_mode: str = "opened"
         # When non-None, the detail panel shows inline forgive-confirmation
         self._confirm_forgive: bool = False
         self._editing_payment_id: int | None = None
@@ -95,6 +101,7 @@ class CreditsView:
             expand=True,
         )
         self._filter_row = ft.Row(spacing=SPACE_XS, wrap=True)
+        self._date_mode_row = ft.Row(spacing=SPACE_XS, wrap=True)
 
         today = clock.today()
         self._dp_start = ft.DatePicker(
@@ -123,6 +130,7 @@ class CreditsView:
 
         self._load_credits()
         self._rebuild_filter_row()
+        self._rebuild_date_mode_row()
         self._sync_date_labels()
         self._rebuild_list()
         self._detail_area.content = self._empty_detail()
@@ -181,6 +189,7 @@ class CreditsView:
                 self._filter_mode,
                 start_date=self._start_date,
                 end_date=self._end_date,
+                date_filter=self._date_filter_mode,
                 search=self._search_query,
             )
 
@@ -193,6 +202,7 @@ class CreditsView:
                 None,
             )
         self._rebuild_filter_row()
+        self._rebuild_date_mode_row()
         self._sync_date_labels()
         self._rebuild_list()
         self._detail_area.content = (
@@ -229,7 +239,7 @@ class CreditsView:
             on_click=self._clear_dates,
             ink=True,
         )
-        return ft.Row(
+        date_row = ft.Row(
             controls=[
                 from_btn,
                 ft.Text("–", size=14, color=ft.Colors.ON_SURFACE_VARIANT),
@@ -238,6 +248,14 @@ class CreditsView:
             ],
             spacing=SPACE_XS,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        return ft.Column(
+            controls=[
+                self._date_mode_row,
+                date_row,
+            ],
+            spacing=SPACE_XS,
+            tight=True,
         )
 
     def _open_picker(self, which: str) -> None:
@@ -298,10 +316,12 @@ class CreditsView:
         self._clear_selection()
         self._load_credits()
         self._rebuild_filter_row()
+        self._rebuild_date_mode_row()
         self._sync_date_labels()
         self._rebuild_list()
         self._summary_text.update()
         self._filter_row.update()
+        self._date_mode_row.update()
         self._from_label.update()
         self._to_label.update()
         self._list_col.update()
@@ -362,6 +382,34 @@ class CreditsView:
             ))
 
         self._filter_row.controls = chips
+
+    def _rebuild_date_mode_row(self) -> None:
+        chips: list[ft.Control] = [
+            ft.Text("თარიღით:", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+        ]
+        for mode, label in _DATE_FILTER_META.items():
+            active = self._date_filter_mode == mode
+
+            def on_click(e, m=mode):
+                if self._date_filter_mode == m:
+                    return
+                self._date_filter_mode = m
+                self._apply_filter_change()
+
+            chips.append(
+                ft.Container(
+                    content=ft.Text(
+                        label, size=11, weight=ft.FontWeight.W_600,
+                        color=ft.Colors.ON_PRIMARY if active else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                    bgcolor=ft.Colors.PRIMARY if active else ft.Colors.SURFACE_CONTAINER,
+                    border_radius=RADIUS_SM,
+                    padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=5),
+                    on_click=on_click,
+                    ink=not active,
+                )
+            )
+        self._date_mode_row.controls = chips
 
     # ──────────────────────────────────────────── credit list
 

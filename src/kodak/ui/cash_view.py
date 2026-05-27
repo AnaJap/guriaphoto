@@ -175,6 +175,7 @@ class CashView:
             self._forgiven = day_forgiven_summary(session, self._date)
 
         withdrawn = sum((w.amount for w, _ in self._pairs), Decimal("0"))
+        net_change = income - withdrawn
         runtime = get_active_theme_runtime()
 
         self._date_label.value = fmt_date(self._date)
@@ -194,6 +195,10 @@ class CashView:
             ft.Container(width=SPACE_SM),
             _stat_card("დღის გატანები", f"₾{withdrawn:.2f}",
                        ft.Icons.OUTPUT, runtime),
+            ft.Container(width=SPACE_SM),
+            _stat_card("ნეტო ცვლილება", f"₾{net_change:.2f}",
+                       ft.Icons.DIFFERENCE, runtime,
+                       note="შემოსავალი − გატანები", width=190),
             ft.Container(width=_gap),
             _stat_card("ნაშთი მიმდინარე დღისთვის", f"₾{closing:.2f}",
                        ft.Icons.ACCOUNT_BALANCE, runtime, highlight=True),
@@ -625,19 +630,19 @@ def _stat_card(
 ) -> ft.Container:
     value_color = runtime.accent if highlight else None
     text_controls: list[ft.Control] = [
-        ft.Text(value, size=18, weight=ft.FontWeight.W_700, color=value_color),
-        ft.Text(label, size=11, color=runtime.muted_text, max_lines=2),
+        ft.Text(value, size=17, weight=ft.FontWeight.W_700, color=value_color),
+        ft.Text(label, size=10, color=runtime.muted_text, max_lines=2),
     ]
     if note:
         text_controls.append(
-            ft.Text(note, size=9, color=runtime.muted_text,
-                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
+            ft.Text(note, size=8, color=runtime.muted_text,
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
         )
     return ft.Container(
         content=ft.Row(
             controls=[
                 ft.Container(
-                    content=ft.Icon(icon, size=15, color=runtime.accent),
+                    content=ft.Icon(icon, size=14, color=runtime.accent),
                     bgcolor=_with_alpha(runtime.accent, 0.10),
                     border_radius=9,
                     padding=ft.padding.all(SPACE_XS + 2),
@@ -657,7 +662,7 @@ def _stat_card(
         border_radius=RADIUS_MD,
         padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
         width=width,
-        height=78,
+        height=66,
     )
 
 
