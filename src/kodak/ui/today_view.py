@@ -94,12 +94,12 @@ class TodayView:
 
     def _sync_layout_chrome(self, runtime=None) -> None:
         runtime = runtime or get_active_theme_runtime()
+        expanded = self._tab == "entry"
         if self._tab == "cash":
             # The cash tab renders its summary (date picker + cards) right in
             # the header box, in place of the default "დღეს" title.
             self._header_area.content = self._get_cash_view().build_summary(runtime)
         else:
-            expanded = self._tab == "entry"
             self._header_area.content = self._build_header_content(
                 clock.today(),
                 runtime,
