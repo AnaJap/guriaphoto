@@ -13,7 +13,10 @@ from kodak.db import get_session
 from kodak.models.enums import Role
 from kodak.models.user import User
 from kodak.services.cash import (
+    day_forgiven_summary,
     day_income,
+    day_repayments_summary,
+    day_sales_summary,
     delete_withdrawal,
     list_day_withdrawals,
     log_withdrawal,
@@ -81,9 +84,16 @@ class CashView:
 
     # ── public ──────────────────────────────────────────────────────
 
-    def build(self) -> ft.Control:
-        runtime = get_active_theme_runtime()
+    def refresh(self) -> None:
+        """Reload data into the persistent controls (called when the tab opens)."""
+        self._reload()
 
+    def build_summary(self, runtime) -> ft.Control:
+        """Header content (title + date picker + summary cards).
+
+        Rendered inside TodayView's top header box, so the cash summary sits in
+        the same place as the entry tab's stat cards — no separate panel.
+        """
         date_btn = ft.Container(
             content=ft.Row(
                 controls=[
@@ -95,7 +105,7 @@ class CashView:
                 tight=True,
             ),
             bgcolor=runtime.panel_bg,
-            border=ft.border.all(1, runtime.panel_border),
+            border=ft.border.all(1, runtime.accent),
             border_radius=RADIUS_MD,
             padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
             on_click=self._open_picker,
@@ -103,33 +113,27 @@ class CashView:
             tooltip="თარიღის არჩევა",
         )
 
-        # Summary section (matches the Today page's stat-card header style).
-        summary_panel = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Text("ნაღდი ფული", size=22,
-                                    weight=ft.FontWeight.W_700, expand=True),
-                            date_btn,
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    ft.Container(height=SPACE_XS),
-                    self._balance_row,
-                ],
-                spacing=SPACE_XS,
-                tight=True,
-            ),
-            bgcolor=runtime.panel_bg,
-            border=ft.border.all(1, runtime.panel_border),
-            border_radius=RADIUS_LG + 4,
-            padding=ft.padding.all(SPACE_MD),
+        return ft.Column(
+            controls=[
+                ft.Row(
+                    controls=[
+                        ft.Text("ნაღდი ფული", size=22,
+                                weight=ft.FontWeight.W_700, expand=True),
+                        date_btn,
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Container(height=SPACE_XS),
+                self._balance_row,
+            ],
+            spacing=SPACE_XS,
+            tight=True,
         )
 
+    def build(self) -> ft.Control:
+        """Body: the daily ledger (move summary rows + withdrawals + add form)."""
         self._root = ft.Column(
-            controls=[summary_panel, self._form_area,
-                      ft.Divider(height=1), self._list_col],
+            controls=[self._form_area, ft.Divider(height=1), self._list_col],
             spacing=SPACE_MD,
             expand=True,
         )
@@ -155,23 +159,30 @@ class CashView:
     # ── data ────────────────────────────────────────────────────────
 
     def _reload(self) -> None:
+        today = clock.today()
         with get_session() as session:
             self._pairs = list_day_withdrawals(session, self._date)
             income      = day_income(session, self._date)
-            balance     = register_balance(session, self._date)
+            day_balance = register_balance(session, self._date)   # closing as of selected day
+            till_now    = register_balance(session, today)        # live current till
+            self._sales = day_sales_summary(session, self._date)
+            self._repaid = day_repayments_summary(session, self._date)
+            self._forgiven = day_forgiven_summary(session, self._date)
 
         withdrawn = sum((w.amount for w, _ in self._pairs), Decimal("0"))
         runtime = get_active_theme_runtime()
 
         self._date_label.value = fmt_date(self._date)
 
-        # summary cards: day income, day withdrawals, cumulative register balance
+        # summary cards: day income, day withdrawals, day-end balance, live till
         self._balance_row.controls = [
             _stat_card("დღის შემოსავალი", f"₾{income:.2f}",
                        ft.Icons.PAYMENTS, runtime),
             _stat_card("დღის გატანა", f"₾{withdrawn:.2f}",
                        ft.Icons.OUTPUT, runtime),
-            _stat_card("სალაროს თანხა", f"₾{balance:.2f}",
+            _stat_card("ნაშთი დღის მდგომარეობით", f"₾{day_balance:.2f}",
+                       ft.Icons.EVENT_AVAILABLE_OUTLINED, runtime),
+            _stat_card("სალაროს თანხა", f"₾{till_now:.2f}",
                        ft.Icons.ACCOUNT_BALANCE, runtime, highlight=True),
         ]
 
@@ -189,14 +200,42 @@ class CashView:
         self._rebuild_list()
 
     def _rebuild_list(self) -> None:
-        if not self._pairs:
+        runtime = get_active_theme_runtime()
+        sales_total, sales_received, sales_count = self._sales
+        repaid_amt, repaid_count = self._repaid
+        forgiven_amt, forgiven_count = self._forgiven
+
+        # Daily money-movement summary rows (read-only).
+        summary_rows: list[ft.Control] = []
+        if sales_count:
+            summary_rows.append(_ledger_row(
+                ft.Icons.RECEIPT_LONG, runtime,
+                label=f"გაყიდვები ({sales_count})",
+                primary=f"მიღებული ₾{sales_received:.2f}",
+                secondary=f"ჯამი ₾{sales_total:.2f}",
+            ))
+        if repaid_count:
+            summary_rows.append(_ledger_row(
+                ft.Icons.REPLAY_CIRCLE_FILLED_OUTLINED, runtime,
+                label=f"დაბრუნებული ნისიები ({repaid_count})",
+                primary=f"₾{repaid_amt:.2f}",
+            ))
+        if forgiven_count:
+            summary_rows.append(_ledger_row(
+                ft.Icons.MONEY_OFF, runtime,
+                label=f"ნაპატიები ნისიები ({forgiven_count})",
+                primary=f"₾{forgiven_amt:.2f}",
+                primary_color=ft.Colors.ERROR,
+            ))
+
+        if not summary_rows and not self._pairs:
             self._list_col.controls = [
                 ft.Container(
                     content=ft.Column(
                         controls=[
                             ft.Icon(ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED,
                                     size=40, color=ft.Colors.OUTLINE),
-                            ft.Text("ამ დღეს გატანა არ ყოფილა",
+                            ft.Text("ამ დღეს ჩანაწერი არ არის",
                                     size=14, color=ft.Colors.ON_SURFACE_VARIANT),
                         ],
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -208,10 +247,23 @@ class CashView:
                     alignment=ft.Alignment(0, 0),
                 )
             ]
+            return
+
+        controls: list[ft.Control] = []
+        if summary_rows:
+            controls.append(_section_label("დღის მოძრაობა"))
+            controls.extend(summary_rows)
+
+        controls.append(_section_label("გატანები"))
+        if not self._pairs:
+            controls.append(
+                ft.Text("ამ დღეს გატანა არ ყოფილა", size=12,
+                        color=ft.Colors.ON_SURFACE_VARIANT, italic=True)
+            )
         else:
-            self._list_col.controls = [
-                self._make_card(w, u) for w, u in self._pairs
-            ]
+            controls.extend(self._make_card(w, u) for w, u in self._pairs)
+
+        self._list_col.controls = controls
 
     # ── card factory ────────────────────────────────────────────────
 
@@ -495,6 +547,58 @@ class CashView:
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
+
+def _section_label(text: str) -> ft.Control:
+    return ft.Container(
+        content=ft.Text(
+            text, size=11, weight=ft.FontWeight.W_700,
+            color=ft.Colors.ON_SURFACE_VARIANT,
+        ),
+        padding=ft.padding.only(top=SPACE_SM, bottom=2),
+    )
+
+
+def _ledger_row(
+    icon: str,
+    runtime,
+    *,
+    label: str,
+    primary: str,
+    secondary: str | None = None,
+    primary_color=None,
+) -> ft.Container:
+    """Read-only daily-movement row (sales / repayments / forgiven)."""
+    right: list[ft.Control] = [
+        ft.Text(primary, size=15, weight=ft.FontWeight.W_700,
+                color=primary_color, text_align=ft.TextAlign.RIGHT),
+    ]
+    if secondary:
+        right.append(
+            ft.Text(secondary, size=11, color=runtime.muted_text,
+                    text_align=ft.TextAlign.RIGHT)
+        )
+    return ft.Container(
+        content=ft.Row(
+            controls=[
+                ft.Container(
+                    content=ft.Icon(icon, size=16, color=runtime.accent),
+                    bgcolor=_with_alpha(runtime.accent, 0.10),
+                    border_radius=9,
+                    padding=ft.padding.all(SPACE_XS + 2),
+                ),
+                ft.Text(label, size=14, weight=ft.FontWeight.W_600, expand=True),
+                ft.Column(right, spacing=0, tight=True,
+                          horizontal_alignment=ft.CrossAxisAlignment.END),
+            ],
+            spacing=SPACE_SM,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        bgcolor=_with_alpha(runtime.accent, 0.06),
+        border=ft.border.all(1, runtime.panel_border),
+        border_radius=RADIUS_LG,
+        padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM + 2),
+    )
+
 
 def _stat_card(
     label: str,

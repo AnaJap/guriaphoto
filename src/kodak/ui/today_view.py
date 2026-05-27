@@ -94,12 +94,17 @@ class TodayView:
 
     def _sync_layout_chrome(self, runtime=None) -> None:
         runtime = runtime or get_active_theme_runtime()
-        expanded = self._tab == "entry"
-        self._header_area.content = self._build_header_content(
-            clock.today(),
-            runtime,
-            expanded=expanded,
-        )
+        if self._tab == "cash":
+            # The cash tab renders its summary (date picker + cards) right in
+            # the header box, in place of the default "დღეს" title.
+            self._header_area.content = self._get_cash_view().build_summary(runtime)
+        else:
+            expanded = self._tab == "entry"
+            self._header_area.content = self._build_header_content(
+                clock.today(),
+                runtime,
+                expanded=expanded,
+            )
         self._header_area.bgcolor = runtime.panel_bg
         self._header_area.border = ft.border.all(1, runtime.panel_border)
         self._header_area.border_radius = RADIUS_LG + 4
@@ -184,6 +189,10 @@ class TodayView:
                 return
             self._tab = k
             self._rebuild_tab_row()
+            # Refresh cash data before building its header summary so the cards
+            # reflect any sales/credits made while on another tab.
+            if k == "cash":
+                self._get_cash_view().refresh()
             self._sync_layout_chrome()
             if self._header_area.page is not None:
                 self._header_area.update()
