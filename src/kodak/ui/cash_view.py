@@ -32,6 +32,7 @@ from kodak.ui.theme import (
     SPACE_LG,
     SPACE_MD,
     SPACE_SM,
+    SPACE_XL,
     SPACE_XS,
     get_active_theme_runtime,
 )
@@ -49,7 +50,12 @@ class CashView:
 
         # ── persistent controls ──────────────────────────────────────
         self._date_label  = ft.Text("", size=13, weight=ft.FontWeight.W_600)
-        self._balance_row = ft.Row(spacing=SPACE_SM, run_spacing=SPACE_SM, wrap=True)
+        # spacing=0: gaps between groups are explicit spacer containers so the
+        # opening/closing cards sit apart from the centered middle pair.
+        self._balance_row = ft.Row(
+            spacing=0, run_spacing=SPACE_SM, wrap=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+        )
         self._form_area   = ft.Container()
         self._list_col    = ft.Column(
             spacing=SPACE_SM, scroll=ft.ScrollMode.AUTO, expand=True,
@@ -175,14 +181,20 @@ class CashView:
 
         # Cash-flow story: opening balance → day income → day withdrawals →
         # closing balance (opening + income − withdrawals == closing).
+        # Opening sits left, closing sits right (wider gap), middle pair centered
+        # with the normal interval between them.
+        _gap = SPACE_XL + SPACE_SM   # wider separation for the edge cards
         self._balance_row.controls = [
             _stat_card("ნაშთი წინა დღის მდგომარეობით", f"₾{opening:.2f}",
                        ft.Icons.HISTORY_TOGGLE_OFF, runtime),
+            ft.Container(width=_gap),
             _stat_card("დღის შემოსავალი", f"₾{income:.2f}",
                        ft.Icons.PAYMENTS, runtime,
-                       note="გაყიდვები + დაბრუნებული ნისია"),
+                       note="გაყიდვები + დაბრუნებული ნისია", width=230),
+            ft.Container(width=SPACE_SM),
             _stat_card("დღის გატანები", f"₾{withdrawn:.2f}",
                        ft.Icons.OUTPUT, runtime),
+            ft.Container(width=_gap),
             _stat_card("ნაშთი მიმდინარე დღისთვის", f"₾{closing:.2f}",
                        ft.Icons.ACCOUNT_BALANCE, runtime, highlight=True),
         ]

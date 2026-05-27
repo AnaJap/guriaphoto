@@ -29,6 +29,7 @@ from kodak.db import DB_PATH
 from kodak.event_log import EVENT_LOG_PATH, log_event
 from kodak.models.enums import Role
 from kodak.models.user import User
+from kodak.services.export import export_all_to_xlsx
 from kodak.session_lock import SessionLockInfo, describe_heartbeat_age, read_session_lock
 from kodak.ui.theme import (
     RADIUS_LG,
@@ -81,7 +82,11 @@ class SettingsView:
         self._db_picker = ft.FilePicker()
         self._backup_picker = ft.FilePicker()
         self._restore_picker = ft.FilePicker()
-        self._page.services.extend([self._db_picker, self._backup_picker, self._restore_picker])
+        self._export_picker = ft.FilePicker()
+        self._page.services.extend([
+            self._db_picker, self._backup_picker, self._restore_picker,
+            self._export_picker,
+        ])
         self._page.update()
 
         # Appearance controls
@@ -130,6 +135,7 @@ class SettingsView:
         )
         self._backup_feedback = ft.Text("", size=12)
         self._restore_feedback = ft.Text("", size=12)
+        self._export_feedback = ft.Text("", size=12)
         self._cleanup_feedback = ft.Text("", size=12)
         self._cleanup_start_field = ft.TextField(
             label="დაწყება",
@@ -250,7 +256,35 @@ class SettingsView:
                 ),
                 self._build_db_section(),
                 self._build_backup_section(),
+                self._build_export_section(),
             ],
+        )
+
+    def _build_export_section(self) -> ft.Control:
+        return ft.Column(
+            controls=[
+                ft.Divider(height=1),
+                ft.Text("მონაცემთა ექსპორტი", size=18, weight=ft.FontWeight.W_700),
+                ft.Text(
+                    "ყველა მონაცემი (გაყიდვები, ნისია, გადახდები, გატანები, "
+                    "პროდუქტები) ერთ Excel ფაილში.",
+                    size=12,
+                    color=get_active_theme_runtime().muted_text,
+                ),
+                ft.Row(
+                    controls=[
+                        self._action_button(
+                            "Excel-ში ექსპორტი (ყველა მონაცემი)",
+                            get_active_theme_runtime().accent,
+                            self._on_pick_export_all,
+                        ),
+                    ],
+                    wrap=True,
+                ),
+                self._export_feedback,
+            ],
+            spacing=SPACE_SM,
+            tight=True,
         )
 
     def _build_session_section(self) -> ft.Control:
@@ -913,6 +947,39 @@ class SettingsView:
             self._backup_feedback,
             f"სარეზერვო ასლი შეიქმნა: {record['path']}",
         )
+
+    # ── full data export ───────────────────────────────────────────────
+
+    def _on_pick_export_all(self, e: ft.ControlEvent) -> None:
+        self._page.run_task(self._pick_export_all)
+
+    async def _pick_export_all(self) -> None:
+        default_name = f"kodak_export_{clock.today():%Y-%m-%d}.xlsx"
+        initial = backup_storage_dir(self._config) or DB_PATH.parent
+        try:
+            target = await self._export_picker.save_file(
+                dialog_title="შეინახეთ Excel ფაილი",
+                file_name=default_name,
+                initial_directory=str(initial),
+                allowed_extensions=["xlsx"],
+            )
+        except Exception as exc:
+            self._set_feedback(self._export_feedback, f"ექსპორტი ვერ მოხერხდა: {exc}", error=True)
+            return
+        if not target:
+            return
+
+        path = Path(target)
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+
+        try:
+            export_all_to_xlsx(path)
+        except Exception as exc:
+            self._set_feedback(self._export_feedback, f"ფაილის შენახვა ვერ მოხერხდა: {exc}", error=True)
+            return
+
+        self._set_feedback(self._export_feedback, f"შენახულია: {path.name}")
 
     def _on_cleanup_backups(self, e: ft.ControlEvent) -> None:
         if not self._ensure_write_allowed(self._cleanup_feedback):
