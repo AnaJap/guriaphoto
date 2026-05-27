@@ -237,7 +237,7 @@ class TodayView:
     def _get_cash_view(self) -> "CashView":
         from kodak.ui.cash_view import CashView
         if self._cash_view is None:
-            self._cash_view = CashView(user=self._user)
+            self._cash_view = CashView(page=self._page, user=self._user)
         return self._cash_view
 
     def _get_history_panel(self) -> "_HistoryPanel":

@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from kodak.access import require_write_access
 from kodak.models.cash import CashWithdrawal
+from kodak.models.credit import CreditPayment
 from kodak.models.transaction import Transaction
 from kodak.models.user import User
 
@@ -73,6 +74,52 @@ def list_day_withdrawals(
 
 
 def day_revenue(session: Session, date: dt.date) -> Decimal:
-    """Sum of amount_received across all transactions for a date."""
+    """Sum of amount_received across all transactions for a date (sales only)."""
     txns = list(session.exec(select(Transaction).where(Transaction.date == date)).all())
     return sum(t.amount_received for t in txns) or Decimal("0")
+
+
+def day_income(session: Session, date: dt.date) -> Decimal:
+    """Actual cash taken in on a date: sale payments + credit (ნისია) repayments."""
+    sales = sum(
+        (t.amount_received
+         for t in session.exec(select(Transaction).where(Transaction.date == date)).all()),
+        Decimal("0"),
+    )
+    repaid = sum(
+        (p.amount
+         for p in session.exec(select(CreditPayment).where(CreditPayment.date == date)).all()),
+        Decimal("0"),
+    )
+    return sales + repaid
+
+
+def register_balance(session: Session, through: dt.date) -> Decimal:
+    """Cumulative cash in the register at the end of ``through``.
+
+    All income (sale payments + credit repayments) minus all withdrawals, for
+    every date up to and including ``through`` — i.e. what should physically be
+    in the till that evening, carried over from prior days plus today's moves.
+    """
+    sales = sum(
+        (t.amount_received
+         for t in session.exec(
+             select(Transaction).where(Transaction.date <= through)
+         ).all()),
+        Decimal("0"),
+    )
+    repaid = sum(
+        (p.amount
+         for p in session.exec(
+             select(CreditPayment).where(CreditPayment.date <= through)
+         ).all()),
+        Decimal("0"),
+    )
+    withdrawn = sum(
+        (w.amount
+         for w in session.exec(
+             select(CashWithdrawal).where(CashWithdrawal.date <= through)
+         ).all()),
+        Decimal("0"),
+    )
+    return sales + repaid - withdrawn

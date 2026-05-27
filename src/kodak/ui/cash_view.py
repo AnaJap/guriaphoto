@@ -1,4 +1,4 @@
-"""Cash withdrawal tab — log register take-outs and track daily balance."""
+"""Cash tab — daily income + cumulative register balance, with withdrawals log."""
 
 from __future__ import annotations
 
@@ -13,13 +13,14 @@ from kodak.db import get_session
 from kodak.models.enums import Role
 from kodak.models.user import User
 from kodak.services.cash import (
-    day_revenue,
+    day_income,
     delete_withdrawal,
     list_day_withdrawals,
     log_withdrawal,
+    register_balance,
     update_withdrawal,
 )
-from kodak.ui.geo import fmt_date
+from kodak.ui.geo import fmt_date, picker_date
 from kodak.ui.theme import (
     ACCENT_GOLD,
     RADIUS_LG,
@@ -29,11 +30,13 @@ from kodak.ui.theme import (
     SPACE_MD,
     SPACE_SM,
     SPACE_XS,
+    get_active_theme_runtime,
 )
 
 
 class CashView:
-    def __init__(self, user: User) -> None:
+    def __init__(self, page: ft.Page, user: User) -> None:
+        self._page     = page
         self._user     = user
         self._read_only = is_read_only()
         self._is_admin = user.role == Role.admin and not self._read_only
@@ -42,20 +45,26 @@ class CashView:
         self._editing_id: int | None = None   # id of withdrawal being edited
 
         # ── persistent controls ──────────────────────────────────────
-        self._date_label  = ft.Text(
-            "", size=14, weight=ft.FontWeight.W_600,
-            expand=True, text_align=ft.TextAlign.CENTER,
-        )
-        self._nav_right = ft.Container(
-            border_radius=RADIUS_SM,
-            padding=ft.padding.all(SPACE_XS),
-            on_click=self._next_day,
-        )
-        self._balance_row = ft.Row(spacing=SPACE_MD, wrap=True)
+        self._date_label  = ft.Text("", size=13, weight=ft.FontWeight.W_600)
+        self._balance_row = ft.Row(spacing=SPACE_SM, run_spacing=SPACE_SM, wrap=True)
         self._form_area   = ft.Container()
         self._list_col    = ft.Column(
             spacing=SPACE_SM, scroll=ft.ScrollMode.AUTO, expand=True,
         )
+
+        # ── date picker (lives in page.overlay) ──────────────────────
+        today = clock.today()
+        self._date_picker = ft.DatePicker(
+            value=today,
+            first_date=dt.date(2020, 1, 1),
+            last_date=today,
+            help_text="აირჩიეთ თარიღი",
+            confirm_text="კარგი",
+            cancel_text="გაუქმება",
+            on_change=self._on_date_picked,
+        )
+        self._page.overlay.append(self._date_picker)
+        self._page.update()
 
         # "add" form fields (reused across reloads when shown)
         self._add_amount = ft.TextField(
@@ -73,24 +82,53 @@ class CashView:
     # ── public ──────────────────────────────────────────────────────
 
     def build(self) -> ft.Control:
-        self._update_nav_right()
+        runtime = get_active_theme_runtime()
 
-        nav = ft.Row(
-            controls=[
-                ft.Container(
-                    content=ft.Icon(ft.Icons.CHEVRON_LEFT, size=22),
-                    on_click=self._prev_day,
-                    ink=True, border_radius=RADIUS_SM,
-                    padding=ft.padding.all(SPACE_XS),
-                ),
-                self._date_label,
-                self._nav_right,
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
+        date_btn = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED, size=15,
+                            color=runtime.accent),
+                    self._date_label,
+                ],
+                spacing=SPACE_XS,
+                tight=True,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+            on_click=self._open_picker,
+            ink=True,
+            tooltip="თარიღის არჩევა",
+        )
+
+        # Summary section (matches the Today page's stat-card header style).
+        summary_panel = ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            ft.Text("ნაღდი ფული", size=22,
+                                    weight=ft.FontWeight.W_700, expand=True),
+                            date_btn,
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Container(height=SPACE_XS),
+                    self._balance_row,
+                ],
+                spacing=SPACE_XS,
+                tight=True,
+            ),
+            bgcolor=runtime.panel_bg,
+            border=ft.border.all(1, runtime.panel_border),
+            border_radius=RADIUS_LG + 4,
+            padding=ft.padding.all(SPACE_MD),
         )
 
         self._root = ft.Column(
-            controls=[nav, self._balance_row, self._form_area,
+            controls=[summary_panel, self._form_area,
                       ft.Divider(height=1), self._list_col],
             spacing=SPACE_MD,
             expand=True,
@@ -98,19 +136,19 @@ class CashView:
         self._mounted = True
         return self._root
 
-    # ── navigation ──────────────────────────────────────────────────
+    # ── date selection ──────────────────────────────────────────────
 
-    def _prev_day(self, e) -> None:
-        self._editing_id = None
-        self._date -= dt.timedelta(days=1)
-        self._reload()
-        self._flush_ui()
+    def _open_picker(self, e) -> None:
+        self._date_picker.value = self._date
+        self._date_picker.open = True
+        self._date_picker.update()
 
-    def _next_day(self, e) -> None:
-        if self._date >= clock.today():
+    def _on_date_picked(self, e) -> None:
+        raw = e.control.value
+        if raw is None:
             return
+        self._date = min(picker_date(raw), clock.today())
         self._editing_id = None
-        self._date += dt.timedelta(days=1)
         self._reload()
         self._flush_ui()
 
@@ -118,20 +156,23 @@ class CashView:
 
     def _reload(self) -> None:
         with get_session() as session:
-            self._pairs  = list_day_withdrawals(session, self._date)
-            revenue      = day_revenue(session, self._date)
+            self._pairs = list_day_withdrawals(session, self._date)
+            income      = day_income(session, self._date)
+            balance     = register_balance(session, self._date)
 
-        withdrawn = sum(w.amount for w, _ in self._pairs) or Decimal("0")
-        balance   = revenue - withdrawn
+        withdrawn = sum((w.amount for w, _ in self._pairs), Decimal("0"))
+        runtime = get_active_theme_runtime()
 
         self._date_label.value = fmt_date(self._date)
-        self._update_nav_right()
 
-        # balance cards
+        # summary cards: day income, day withdrawals, cumulative register balance
         self._balance_row.controls = [
-            _card("შემოსავალი", f"\u20be{revenue:.2f}",   ft.Icons.PAYMENTS,         ACCENT_GOLD),
-            _card("გატანა",     f"\u20be{withdrawn:.2f}", ft.Icons.OUTPUT,            ft.Colors.ERROR),
-            _card("სალაროში",   f"\u20be{balance:.2f}",   ft.Icons.ACCOUNT_BALANCE,  ft.Colors.PRIMARY),
+            _stat_card("დღის შემოსავალი", f"₾{income:.2f}",
+                       ft.Icons.PAYMENTS, runtime),
+            _stat_card("დღის გატანა", f"₾{withdrawn:.2f}",
+                       ft.Icons.OUTPUT, runtime),
+            _stat_card("სალაროს თანხა", f"₾{balance:.2f}",
+                       ft.Icons.ACCOUNT_BALANCE, runtime, highlight=True),
         ]
 
         # "add" form: today for everyone, any day for admin
@@ -203,7 +244,7 @@ class CashView:
                         expand=True, italic=True)
             )
         row_controls.append(
-            ft.Text(f"\u20be{w.amount:.2f}", size=15,
+            ft.Text(f"₾{w.amount:.2f}", size=15,
                     weight=ft.FontWeight.W_700, color=ft.Colors.ERROR)
         )
         if self._is_admin:
@@ -398,7 +439,7 @@ class CashView:
                 )
 
             self._add_feedback.color = ft.Colors.PRIMARY
-            self._add_feedback.value = f"\u20be{amount:.2f} — დაფიქსირდა ✓"
+            self._add_feedback.value = f"₾{amount:.2f} — დაფიქსირდა ✓"
             self._reload()
             self._flush_ui()
 
@@ -444,19 +485,9 @@ class CashView:
 
     # ── UI helpers ──────────────────────────────────────────────────
 
-    def _update_nav_right(self) -> None:
-        future = self._date >= clock.today()
-        self._nav_right.content = ft.Icon(
-            ft.Icons.CHEVRON_RIGHT, size=22,
-            color=ft.Colors.ON_SURFACE_VARIANT if future else None,
-        )
-        self._nav_right.ink     = not future
-        self._nav_right.opacity = 0.35 if future else 1.0
-
     def _flush_ui(self) -> None:
         if not self._mounted:
             return
-        self._nav_right.update()
         self._date_label.update()
         self._balance_row.update()
         self._form_area.update()
@@ -465,19 +496,49 @@ class CashView:
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
-def _card(label: str, value: str, icon: str, icon_color) -> ft.Container:
+def _stat_card(
+    label: str,
+    value: str,
+    icon: str,
+    runtime,
+    *,
+    highlight: bool = False,
+    width: int = 190,
+) -> ft.Container:
+    value_color = runtime.accent if highlight else None
     return ft.Container(
-        content=ft.Column(
+        content=ft.Row(
             controls=[
-                ft.Icon(icon, size=20, color=icon_color),
-                ft.Text(value, size=24, weight=ft.FontWeight.W_700),
-                ft.Text(label, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Container(
+                    content=ft.Icon(icon, size=15, color=runtime.accent),
+                    bgcolor=_with_alpha(runtime.accent, 0.10),
+                    border_radius=9,
+                    padding=ft.padding.all(SPACE_XS + 2),
+                ),
+                ft.Column(
+                    controls=[
+                        ft.Text(value, size=18, weight=ft.FontWeight.W_700,
+                                color=value_color),
+                        ft.Text(label, size=11, color=runtime.muted_text, max_lines=2),
+                    ],
+                    spacing=1,
+                    tight=True,
+                    expand=True,
+                ),
             ],
-            spacing=SPACE_XS,
-            tight=True,
+            spacing=SPACE_SM,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        bgcolor=ft.Colors.SURFACE_CONTAINER,
-        border_radius=RADIUS_LG,
-        padding=ft.padding.all(SPACE_LG),
-        width=170,
+        bgcolor=_with_alpha(runtime.accent, 0.08) if highlight else runtime.panel_bg,
+        border=ft.border.all(1, runtime.accent if highlight else runtime.panel_border),
+        border_radius=RADIUS_MD,
+        padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
+        width=width,
+        height=74,
     )
+
+
+def _with_alpha(color: str, alpha: float) -> str:
+    raw = color.lstrip("#")
+    pct = max(0, min(255, round(alpha * 255)))
+    return f"#{pct:02X}{raw.upper()}"
