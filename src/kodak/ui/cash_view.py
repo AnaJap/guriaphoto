@@ -159,12 +159,11 @@ class CashView:
     # ── data ────────────────────────────────────────────────────────
 
     def _reload(self) -> None:
-        today = clock.today()
         with get_session() as session:
-            self._pairs = list_day_withdrawals(session, self._date)
-            income      = day_income(session, self._date)
-            day_balance = register_balance(session, self._date)   # closing as of selected day
-            till_now    = register_balance(session, today)        # live current till
+            self._pairs   = list_day_withdrawals(session, self._date)
+            income        = day_income(session, self._date)
+            opening       = register_balance(session, self._date - dt.timedelta(days=1))
+            closing       = register_balance(session, self._date)
             self._sales = day_sales_summary(session, self._date)
             self._repaid = day_repayments_summary(session, self._date)
             self._forgiven = day_forgiven_summary(session, self._date)
@@ -174,15 +173,17 @@ class CashView:
 
         self._date_label.value = fmt_date(self._date)
 
-        # summary cards: day income, day withdrawals, day-end balance, live till
+        # Cash-flow story: opening balance → day income → day withdrawals →
+        # closing balance (opening + income − withdrawals == closing).
         self._balance_row.controls = [
+            _stat_card("ნაშთი წინა დღის მდგომარეობით", f"₾{opening:.2f}",
+                       ft.Icons.HISTORY_TOGGLE_OFF, runtime),
             _stat_card("დღის შემოსავალი", f"₾{income:.2f}",
-                       ft.Icons.PAYMENTS, runtime),
-            _stat_card("დღის გატანა", f"₾{withdrawn:.2f}",
+                       ft.Icons.PAYMENTS, runtime,
+                       note="გაყიდვები + დაბრუნებული ნისია"),
+            _stat_card("დღის გატანები", f"₾{withdrawn:.2f}",
                        ft.Icons.OUTPUT, runtime),
-            _stat_card("ნაშთი დღის მდგომარეობით", f"₾{day_balance:.2f}",
-                       ft.Icons.EVENT_AVAILABLE_OUTLINED, runtime),
-            _stat_card("სალაროს თანხა", f"₾{till_now:.2f}",
+            _stat_card("ნაშთი მიმდინარე დღისთვის", f"₾{closing:.2f}",
                        ft.Icons.ACCOUNT_BALANCE, runtime, highlight=True),
         ]
 
@@ -606,10 +607,20 @@ def _stat_card(
     icon: str,
     runtime,
     *,
+    note: str | None = None,
     highlight: bool = False,
-    width: int = 190,
+    width: int = 200,
 ) -> ft.Container:
     value_color = runtime.accent if highlight else None
+    text_controls: list[ft.Control] = [
+        ft.Text(value, size=18, weight=ft.FontWeight.W_700, color=value_color),
+        ft.Text(label, size=11, color=runtime.muted_text, max_lines=2),
+    ]
+    if note:
+        text_controls.append(
+            ft.Text(note, size=9, color=runtime.muted_text,
+                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
+        )
     return ft.Container(
         content=ft.Row(
             controls=[
@@ -620,11 +631,7 @@ def _stat_card(
                     padding=ft.padding.all(SPACE_XS + 2),
                 ),
                 ft.Column(
-                    controls=[
-                        ft.Text(value, size=18, weight=ft.FontWeight.W_700,
-                                color=value_color),
-                        ft.Text(label, size=11, color=runtime.muted_text, max_lines=2),
-                    ],
+                    controls=text_controls,
                     spacing=1,
                     tight=True,
                     expand=True,
@@ -638,7 +645,7 @@ def _stat_card(
         border_radius=RADIUS_MD,
         padding=ft.padding.symmetric(horizontal=SPACE_MD, vertical=SPACE_SM),
         width=width,
-        height=74,
+        height=78,
     )
 
 
