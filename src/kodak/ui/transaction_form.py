@@ -9,12 +9,12 @@ made in the Products tab is immediately reflected here.
 
 from __future__ import annotations
 
-import datetime as dt
 from decimal import Decimal
 from typing import Callable
 
 import flet as ft
 
+from kodak import clock
 from kodak.access import is_read_only
 from kodak.db import get_session
 from kodak.models.enums import ProductCategory
@@ -440,7 +440,7 @@ class TransactionForm:
             with get_session() as session:
                 result = create_transaction(
                     session,
-                    date=dt.date.today(),
+                    date=clock.today(),
                     customer_surname=surname,
                     items=items,
                     amount_received=received,

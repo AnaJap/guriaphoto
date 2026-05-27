@@ -11,6 +11,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from kodak import clock
 from kodak.models.enums import CreditStatus, ProductCategory
 from kodak.services.history import RangeSummary, TxnDetail
 
@@ -117,7 +118,7 @@ def _write_summary_block(
     )
     _kv(ws, r, "პერიოდი:", period)
     r += 1
-    _kv(ws, r, "შექმნის თარიღი:", f"{dt.datetime.now():%d.%m.%Y %H:%M}")
+    _kv(ws, r, "შექმნის თარიღი:", f"{clock.now():%d.%m.%Y %H:%M}")
     r += 2
 
     ws.cell(row=r, column=1, value="შემაჯამებელი მაჩვენებლები").font = _SECTION_FONT
@@ -230,7 +231,7 @@ def _write_txn_row(ws: Worksheet, r: int, d: TxnDetail) -> None:
 
     values = [
         f"{d.txn.date:%d.%m.%Y}",
-        d.txn.created_at.strftime("%H:%M"),
+        clock.to_local(d.txn.created_at).strftime("%H:%M"),
         d.txn.customer_surname,
         products or "—",
         _money(d.total),

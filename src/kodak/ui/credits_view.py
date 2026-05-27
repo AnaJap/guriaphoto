@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import flet as ft
 
+from kodak import clock
 from kodak.access import is_read_only
 from kodak.db import get_session
 from kodak.models.credit import Credit, CreditPayment
@@ -95,7 +96,7 @@ class CreditsView:
         )
         self._filter_row = ft.Row(spacing=SPACE_XS, wrap=True)
 
-        today = dt.date.today()
+        today = clock.today()
         self._dp_start = ft.DatePicker(
             value=today,
             first_date=dt.date(2020, 1, 1),
@@ -240,7 +241,7 @@ class CreditsView:
         )
 
     def _open_picker(self, which: str) -> None:
-        today = dt.date.today()
+        today = clock.today()
         self._dp_start.last_date = today
         self._dp_end.last_date = today
         if which == "start":
@@ -257,7 +258,7 @@ class CreditsView:
         if raw is None:
             return
         picked = picker_date(raw)
-        picked = min(picked, dt.date.today())
+        picked = min(picked, clock.today())
         self._start_date = picked
         if self._end_date is not None and self._start_date > self._end_date:
             self._end_date = self._start_date
@@ -268,7 +269,7 @@ class CreditsView:
         if raw is None:
             return
         picked = picker_date(raw)
-        picked = min(picked, dt.date.today())
+        picked = min(picked, clock.today())
         self._end_date = picked
         if self._start_date is not None and self._end_date < self._start_date:
             self._start_date = self._end_date
@@ -548,7 +549,7 @@ class CreditsView:
                             session,
                             credit_id=credit.id,
                             amount=amount,
-                            date_paid=dt.date.today(),
+                            date_paid=clock.today(),
                             notes=note_field.value.strip() or None,
                             created_by_user_id=self._user.id,
                         )
@@ -712,7 +713,7 @@ class CreditsView:
         elif is_forgiven:
             # Show who forgave and when
             forgiven_at_str = (
-                credit.forgiven_at.strftime("%d/%m/%Y %H:%M")
+                clock.to_local(credit.forgiven_at).strftime("%d/%m/%Y %H:%M")
                 if credit.forgiven_at else "—"
             )
             bottom_section = [

@@ -11,6 +11,7 @@ from typing import Any
 
 import flet as ft
 
+from kodak import clock
 from kodak.access import AccessMode
 from kodak.backup import (
     BackupError,
@@ -1021,7 +1022,7 @@ class SettingsView:
         safety_hint_root = backup_storage_dir(self._config) or DB_PATH.parent
         try:
             stat = self._pending_restore_file.stat()
-            modified = datetime.fromtimestamp(stat.st_mtime).astimezone()
+            modified = clock.to_local(datetime.fromtimestamp(stat.st_mtime, tz=UTC))
             preview = (
                 f"ზომა: {stat.st_size / (1024 * 1024):.1f} MB  ·  "
                 f"შეცვლილია: {modified.strftime('%Y-%m-%d %H:%M')}"

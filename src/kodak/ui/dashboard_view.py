@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import flet as ft
 
+from kodak import clock
 from kodak.db import get_session
 from kodak.models.enums import ProductCategory
 from kodak.models.user import User
@@ -50,7 +51,7 @@ class DashboardView:
         self._root: ft.Column | None = None
         self._data: DashboardData | None = None
 
-        today = dt.date.today()
+        today = clock.today()
         self._active_preset = "week"
         self._month = today.replace(day=1)
         self._start, self._end = _current_week(today)
@@ -145,7 +146,7 @@ class DashboardView:
         ]
 
     def _set_preset(self, preset: str) -> None:
-        today = dt.date.today()
+        today = clock.today()
         if preset == "week":
             self._start, self._end = _current_week(today)
         elif preset == "month":
@@ -279,7 +280,7 @@ class DashboardView:
         if raw is None:
             return
         self._active_preset = "custom"
-        self._start = min(picker_date(raw), dt.date.today())
+        self._start = min(picker_date(raw), clock.today())
         if self._start > self._end:
             self._end = self._start
         self._rebuild_preset_row()
@@ -292,7 +293,7 @@ class DashboardView:
         if raw is None:
             return
         self._active_preset = "custom"
-        self._end = min(picker_date(raw), dt.date.today())
+        self._end = min(picker_date(raw), clock.today())
         if self._end < self._start:
             self._start = self._end
         self._rebuild_preset_row()

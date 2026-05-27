@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 import flet as ft
 
+from kodak import clock
 from kodak.access import is_read_only
 from kodak.db import get_session
 from kodak.models.enums import Role
@@ -36,7 +37,7 @@ class CashView:
         self._user     = user
         self._read_only = is_read_only()
         self._is_admin = user.role == Role.admin and not self._read_only
-        self._date     = dt.date.today()
+        self._date     = clock.today()
         self._mounted  = False
         self._editing_id: int | None = None   # id of withdrawal being edited
 
@@ -106,7 +107,7 @@ class CashView:
         self._flush_ui()
 
     def _next_day(self, e) -> None:
-        if self._date >= dt.date.today():
+        if self._date >= clock.today():
             return
         self._editing_id = None
         self._date += dt.timedelta(days=1)
@@ -134,7 +135,7 @@ class CashView:
         ]
 
         # "add" form: today for everyone, any day for admin
-        show_form = not self._read_only and ((self._date == dt.date.today()) or self._is_admin)
+        show_form = not self._read_only and ((self._date == clock.today()) or self._is_admin)
         if show_form:
             self._add_amount.value   = ""
             self._add_note.value     = ""
@@ -179,7 +180,7 @@ class CashView:
         return self._build_read_card(w, u)
 
     def _build_read_card(self, w, u: User) -> ft.Container:
-        time_str = w.created_at.strftime("%H:%M")
+        time_str = clock.to_local(w.created_at).strftime("%H:%M")
 
         row_controls: list[ft.Control] = [
             ft.Text(time_str, size=12,
@@ -282,7 +283,7 @@ class CashView:
             if self._mounted:
                 self._list_col.update()
 
-        time_str = w.created_at.strftime("%H:%M")
+        time_str = clock.to_local(w.created_at).strftime("%H:%M")
 
         return ft.Container(
             content=ft.Column(
@@ -444,7 +445,7 @@ class CashView:
     # ── UI helpers ──────────────────────────────────────────────────
 
     def _update_nav_right(self) -> None:
-        future = self._date >= dt.date.today()
+        future = self._date >= clock.today()
         self._nav_right.content = ft.Icon(
             ft.Icons.CHEVRON_RIGHT, size=22,
             color=ft.Colors.ON_SURFACE_VARIANT if future else None,

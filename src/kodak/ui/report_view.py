@@ -12,6 +12,7 @@ from pathlib import Path
 
 import flet as ft
 
+from kodak import clock
 from kodak.db import get_session
 from kodak.models.enums import ProductCategory
 from kodak.models.user import User
@@ -53,7 +54,7 @@ class ReportView:
         self._mounted  = False
         self._data: ReportData | None = None
 
-        today = dt.date.today()
+        today = clock.today()
         self._active_preset = "month"
         self._month = today.replace(day=1)          # first day of displayed month
         self._start = self._month
@@ -158,7 +159,7 @@ class ReportView:
     # ── presets ───────────────────────────────────────────────────
 
     def _set_preset(self, preset: str) -> None:
-        today = dt.date.today()
+        today = clock.today()
         if preset == "month":
             self._month = today.replace(day=1)
             self._start = self._month
@@ -206,7 +207,7 @@ class ReportView:
             self._period_ctrl.content = self._build_date_pickers()
 
     def _build_month_nav(self) -> ft.Control:
-        future = last_day_of_month(self._month) >= dt.date.today()
+        future = last_day_of_month(self._month) >= clock.today()
 
         def prev_month(e):
             # go back one month
@@ -215,7 +216,7 @@ class ReportView:
             else:
                 self._month = self._month.replace(month=self._month.month - 1)
             self._start = self._month
-            self._end   = min(last_day_of_month(self._month), dt.date.today())
+            self._end   = min(last_day_of_month(self._month), clock.today())
             self._rebuild_period_ctrl()
             self._load_data()
             self._flush_ui()
@@ -228,7 +229,7 @@ class ReportView:
             else:
                 self._month = self._month.replace(month=self._month.month + 1)
             self._start = self._month
-            self._end   = min(last_day_of_month(self._month), dt.date.today())
+            self._end   = min(last_day_of_month(self._month), clock.today())
             self._rebuild_period_ctrl()
             self._load_data()
             self._flush_ui()
@@ -318,7 +319,7 @@ class ReportView:
         raw = e.control.value
         if raw is None:
             return
-        self._start = min(picker_date(raw), dt.date.today())
+        self._start = min(picker_date(raw), clock.today())
         if self._start > self._end:
             self._end = self._start
         self._rebuild_period_ctrl()
@@ -329,7 +330,7 @@ class ReportView:
         raw = e.control.value
         if raw is None:
             return
-        self._end = min(picker_date(raw), dt.date.today())
+        self._end = min(picker_date(raw), clock.today())
         if self._end < self._start:
             self._start = self._end
         self._rebuild_period_ctrl()

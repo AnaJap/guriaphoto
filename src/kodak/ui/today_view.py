@@ -9,6 +9,7 @@ from pathlib import Path
 import flet as ft
 from sqlmodel import select
 
+from kodak import clock
 from kodak.access import is_read_only
 from kodak.db import get_session
 from kodak.models.credit import Credit, CreditPayment
@@ -78,7 +79,7 @@ class TodayView:
         if self._tab == "entry":
             self._content.content = self._make_entry_view()
 
-        today = dt.date.today()
+        today = clock.today()
         runtime = get_active_theme_runtime()
         self._sync_layout_chrome(runtime)
         return ft.Column(
@@ -95,7 +96,7 @@ class TodayView:
         runtime = runtime or get_active_theme_runtime()
         expanded = self._tab == "entry"
         self._header_area.content = self._build_header_content(
-            dt.date.today(),
+            clock.today(),
             runtime,
             expanded=expanded,
         )
@@ -126,7 +127,7 @@ class TodayView:
     # ──────────────────────────────────────────── stats
 
     def _build_stat_cards(self) -> list[ft.Control]:
-        today = dt.date.today()
+        today = clock.today()
         with get_session() as session:
             txns = list(session.exec(
                 select(Transaction).where(Transaction.date == today)
@@ -284,7 +285,7 @@ class _HistoryPanel:
             height=42,
         )
 
-        today = dt.date.today()
+        today = clock.today()
         self._start = today
         self._end = today
         self._active_preset: str = "today"
@@ -492,7 +493,7 @@ class _HistoryPanel:
         raw = e.control.value
         if raw is None:
             return
-        picked = min(picker_date(raw), dt.date.today())
+        picked = min(picker_date(raw), clock.today())
         self._start = picked
         if self._start > self._end:
             self._end = self._start
@@ -503,7 +504,7 @@ class _HistoryPanel:
         raw = e.control.value
         if raw is None:
             return
-        picked = min(picker_date(raw), dt.date.today())
+        picked = min(picker_date(raw), clock.today())
         self._end = picked
         if self._end < self._start:
             self._start = self._end
@@ -513,7 +514,7 @@ class _HistoryPanel:
     # ── presets ──────────────────────────────────────────────────────
 
     def _set_preset(self, preset: str) -> None:
-        today = dt.date.today()
+        today = clock.today()
         if preset == "today":
             self._start = today
             self._end = today
@@ -975,7 +976,7 @@ class _HistoryPanel:
                                     weight=ft.FontWeight.W_600,
                                     color=runtime.accent, expand=True),
                             ft.Text(
-                                d.txn.created_at.strftime("%H:%M  ·  ")
+                                clock.to_local(d.txn.created_at).strftime("%H:%M  ·  ")
                                 + fmt_date(d.txn.date),
                                 size=11, color=ft.Colors.ON_SURFACE_VARIANT,
                             ),
@@ -1042,7 +1043,7 @@ class _HistoryPanel:
 
 def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
     runtime = runtime or get_active_theme_runtime()
-    time_str = d.txn.created_at.strftime("%H:%M")
+    time_str = clock.to_local(d.txn.created_at).strftime("%H:%M")
     has_credit = d.credit is not None
     credit_cleared = has_credit and d.credit.status == CreditStatus.cleared
     item_summary = ", ".join(
