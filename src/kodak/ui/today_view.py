@@ -858,10 +858,8 @@ class _HistoryPanel:
             for d in day_txns:
                 if self._editing_txn_id == d.txn.id:
                     controls.append(self._build_edit_form(d))
-                elif self._can_edit_records:
-                    controls.append(self._editable_card(d))
                 else:
-                    controls.append(_txn_card(d, runtime))
+                    controls.append(self._history_row(d))
 
         self._list_col.controls = controls
 
@@ -876,19 +874,28 @@ class _HistoryPanel:
 
     # ── editable card (read-only card + edit pencil overlay) ─────────
 
-    def _editable_card(self, d: TxnDetail) -> ft.Stack:
-        runtime = get_active_theme_runtime()
-        def on_edit(e, txn_id=d.txn.id):
-            self._editing_txn_id = txn_id
-            self._build_list_controls(self._rows)
-            self._list_col.update()
+    def _history_row(self, d: TxnDetail) -> ft.Row:
+        """One record line: framed card + credit badge + edit button, side by side.
 
-        return ft.Stack(
-            controls=[
-                _txn_card(d, runtime),
+        The badge and edit button sit OUTSIDE the card frame so they never
+        overlap the amounts, and every row's figures line up vertically.
+        """
+        runtime = get_active_theme_runtime()
+        controls: list[ft.Control] = [
+            _txn_card(d, runtime),
+            _credit_badge_zone(d, runtime),
+        ]
+
+        if self._can_edit_records:
+            def on_edit(e, txn_id=d.txn.id):
+                self._editing_txn_id = txn_id
+                self._build_list_controls(self._rows)
+                self._list_col.update()
+
+            controls.append(
                 ft.Container(
                     content=ft.Icon(
-                        ft.Icons.EDIT_OUTLINED, size=13,
+                        ft.Icons.EDIT_OUTLINED, size=14,
                         color=ft.Colors.ON_SURFACE_VARIANT,
                     ),
                     on_click=on_edit,
@@ -898,12 +905,16 @@ class _HistoryPanel:
                     border=ft.border.all(1, runtime.panel_border),
                     padding=ft.padding.all(5),
                     alignment=ft.Alignment(0, 0),
-                    width=26,
-                    height=26,
-                    right=SPACE_SM,
-                    top=SPACE_SM,
-                ),
-            ],
+                    width=_EDIT_W,
+                    height=_EDIT_W,
+                    tooltip="რედაქტირება",
+                )
+            )
+
+        return ft.Row(
+            controls=controls,
+            spacing=SPACE_SM,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     # ── inline edit form ─────────────────────────────────────────────
@@ -1119,33 +1130,25 @@ class _HistoryPanel:
 
 # ──────────────────────────────────────────────────── shared helpers
 
+# History row layout widths — keep amounts and trailing zones aligned across rows.
+_AMOUNT_W = 92   # right-aligned amount column inside the card frame
+_BADGE_W = 172   # credit-status zone (outside the frame)
+_EDIT_W = 30     # edit-pencil zone (outside the frame)
+
+
 def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
+    """Bordered record frame: time · description · right-aligned amounts.
+
+    The credit badge and edit button live OUTSIDE this frame (see
+    `_HistoryPanel._history_row`) so they never overlap the amounts and every
+    row's figures sit at the same x.
+    """
     runtime = runtime or get_active_theme_runtime()
     time_str = clock.to_local(d.txn.created_at).strftime("%H:%M")
-    has_credit = d.credit is not None
-    credit_cleared = has_credit and d.credit.status == CreditStatus.cleared
     item_summary = ", ".join(
         f"{prod.name} {prod.size_label or ''}".strip() + f" x{li.quantity}"
         for li, prod in d.items
     )
-
-    credit_badges: list[ft.Control] = []
-    if has_credit:
-        badge_color = "#4CAF50" if credit_cleared else runtime.accent
-        badge_text = (
-            "ნისია დახურულია"
-            if credit_cleared
-            else f"ნისია {d.credit.code}  \u20be{d.credit.remaining_amount:.2f}"
-        )
-        credit_badges = [
-            ft.Container(
-                content=ft.Text(badge_text, size=10, weight=ft.FontWeight.W_600,
-                                color=ft.Colors.WHITE),
-                bgcolor=badge_color,
-                border_radius=RADIUS_SM,
-                padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=2),
-            )
-        ]
 
     return ft.Container(
         content=ft.Row(
@@ -1170,13 +1173,13 @@ def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
                 ft.Column(
                     controls=[
                         ft.Text(
-                            f"\u20be{d.total:.2f}",
+                            f"₾{d.total:.2f}",
                             size=14,
                             weight=ft.FontWeight.W_700,
                             text_align=ft.TextAlign.RIGHT,
                         ),
                         ft.Text(
-                            f"მიღ. \u20be{d.txn.amount_received:.2f}",
+                            f"მიღ. ₾{d.txn.amount_received:.2f}",
                             size=9,
                             color=runtime.muted_text,
                             text_align=ft.TextAlign.RIGHT,
@@ -1184,10 +1187,9 @@ def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
                     ],
                     spacing=0,
                     tight=True,
-                    width=88,
+                    width=_AMOUNT_W,
                     horizontal_alignment=ft.CrossAxisAlignment.END,
                 ),
-                *credit_badges,
             ],
             spacing=SPACE_XS,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1196,7 +1198,38 @@ def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
         border=ft.border.all(1, runtime.panel_border),
         border_radius=RADIUS_MD,
         padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=6),
+        expand=True,
     )
+
+
+def _credit_badge_zone(d: TxnDetail, runtime=None) -> ft.Container:
+    """Fixed-width credit-status zone placed to the right of the frame.
+
+    Returns an empty spacer (same width) when there is no credit, so amounts
+    stay aligned whether or not a row has a credit.
+    """
+    runtime = runtime or get_active_theme_runtime()
+    if d.credit is None:
+        return ft.Container(width=_BADGE_W)
+
+    status = d.credit.status
+    if status == CreditStatus.cleared:
+        color, text = "#4CAF50", "ნისია დახურულია"
+    elif status == CreditStatus.forgiven:
+        color, text = "#9575CD", "ნისია ნაპატიები"
+    else:
+        color = runtime.accent
+        text = f"ნისია {d.credit.code}  ₾{d.credit.remaining_amount:.2f}"
+
+    pill = ft.Container(
+        content=ft.Text(text, size=10, weight=ft.FontWeight.W_600,
+                        color=ft.Colors.WHITE, no_wrap=True,
+                        overflow=ft.TextOverflow.ELLIPSIS),
+        bgcolor=color,
+        border_radius=RADIUS_SM,
+        padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=3),
+    )
+    return ft.Container(content=pill, width=_BADGE_W, alignment=ft.Alignment(1, 0))
 
 
 def _mini_btn(
