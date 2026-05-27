@@ -35,7 +35,8 @@ _CAT_LABEL: dict[ProductCategory, str] = {
 }
 
 _CREDIT_STATUS_LABEL: dict[CreditStatus, str] = {
-    CreditStatus.active:   "გახსნილი",
+    CreditStatus.active:   "გადაუხდელი",
+    CreditStatus.partial:  "ნაწილობრივ გადახდილი",
     CreditStatus.cleared:  "დახურული",
     CreditStatus.forgiven: "ნაპატიები",
 }

@@ -230,8 +230,8 @@ class TransactionForm:
             self._active_cat = c
             self._rebuild_cat_row()
             self._rebuild_product_wrap()
-            self._cat_row.update()
-            self._product_wrap.update()
+            _safe_update(self._cat_row)
+            _safe_update(self._product_wrap)
 
         return ft.Container(
             content=ft.Text(
@@ -361,10 +361,10 @@ class TransactionForm:
         total = self._total()
         self._total_val.value = f"₾{total:.2f}"
         self._update_credit_row(total)
-        self._product_wrap.update()
-        self._cart_col.update()
-        self._total_val.update()
-        self._credit_row.update()
+        _safe_update(self._product_wrap)
+        _safe_update(self._cart_col)
+        _safe_update(self._total_val)
+        _safe_update(self._credit_row)
 
     def _update_credit_row(self, total: Decimal) -> None:
         received = self._parse_received()
@@ -398,11 +398,11 @@ class TransactionForm:
     def _clear_feedback(self, e) -> None:
         if self._feedback.value:
             self._feedback.value = ""
-            self._feedback.update()
+            _safe_update(self._feedback)
 
     def _on_received_change(self, e) -> None:
         self._update_credit_row(self._total())
-        self._credit_row.update()
+        _safe_update(self._credit_row)
 
     def _on_confirm(self, e) -> None:
         self._feedback.color = ft.Colors.ERROR
@@ -410,7 +410,7 @@ class TransactionForm:
         surname = (self._surname_field.value or "").strip()
         if not surname:
             self._feedback.value = "გვარი სავალდებულოა."
-            self._feedback.update()
+            _safe_update(self._feedback)
             return
 
         items = [
@@ -420,17 +420,17 @@ class TransactionForm:
         ]
         if not items:
             self._feedback.value = "დაამატეთ მინიმუმ ერთი პროდუქტი."
-            self._feedback.update()
+            _safe_update(self._feedback)
             return
 
         received = self._parse_received()
         if received is None:
             self._feedback.value = "გადახდილი თანხა სავალდებულოა (0 თუ სრულად ნისია)."
-            self._feedback.update()
+            _safe_update(self._feedback)
             return
         if received < 0:
             self._feedback.value = "თანხა არ შეიძლება იყოს უარყოფითი."
-            self._feedback.update()
+            _safe_update(self._feedback)
             return
 
         notes_raw = (self._notes_field.value or "").strip()
@@ -449,7 +449,7 @@ class TransactionForm:
                 )
         except Exception as exc:
             self._feedback.value = str(exc)
-            self._feedback.update()
+            _safe_update(self._feedback)
             return
 
         saved_total = sum(li.line_total for li in result.line_items)
@@ -459,9 +459,9 @@ class TransactionForm:
         self._surname_field.value = ""
         self._received_field.value = ""
         self._notes_field.value = ""
-        self._surname_field.update()
-        self._received_field.update()
-        self._notes_field.update()
+        _safe_update(self._surname_field)
+        _safe_update(self._received_field)
+        _safe_update(self._notes_field)
         self._full_refresh()
 
         if credit:
@@ -471,7 +471,7 @@ class TransactionForm:
 
         self._feedback.color = ft.Colors.PRIMARY
         self._feedback.value = msg
-        self._feedback.update()
+        _safe_update(self._feedback)
 
         self._on_saved()
 
@@ -490,6 +490,13 @@ def _stepper_btn(label: str, on_click) -> ft.Container:
         width=28,
         height=28,
     )
+
+
+def _safe_update(control: ft.Control) -> None:
+    try:
+        control.update()
+    except AssertionError:
+        pass
 
 
 def _confirm_btn(on_click) -> ft.Container:

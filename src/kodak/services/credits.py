@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from decimal import Decimal
 
 from sqlalchemy import or_
@@ -11,10 +12,27 @@ from sqlmodel import Session, select
 from kodak.access import require_write_access
 from kodak.models.credit import Credit, CreditPayment
 from kodak.models.enums import CreditStatus
-from kodak.models.transaction import Transaction
+from kodak.models.transaction import LineItem, Transaction
 
 # Statuses that represent an outstanding balance (shown in stats / open list)
 _OPEN_STATUSES = (CreditStatus.active, CreditStatus.partial)
+
+
+@dataclass(frozen=True)
+class CreditSaleAmounts:
+    sale_total: Decimal
+    initial_paid: Decimal
+
+
+@dataclass(frozen=True)
+class CreditPaymentDisplayRow:
+    credit: Credit
+    date: dt.date
+    amount: Decimal
+    created_at: dt.datetime
+    notes: str | None = None
+    payment: CreditPayment | None = None
+    label: str | None = None
 
 
 def record_payment(
@@ -248,28 +266,34 @@ def sync_initial_credit_statuses(session: Session) -> int:
 
 def list_credits_by_filter(
     session: Session,
-    status_filter: str = "active",
+    status_filter: str | list[CreditStatus] | tuple[CreditStatus, ...] | set[CreditStatus] = "active",
     *,
     start_date: dt.date | None = None,
     end_date: dt.date | None = None,
-    date_filter: str = "opened",
     search: str = "",
 ) -> list[Credit]:
     """Return credits matching *status_filter*.
 
     filter values:
       "all"      — every credit
-      "active"   — active + partial (default)
+      "active"   — unpaid active credits
       "open"     — active + partial (legacy alias)
       "partial"  — partially paid
       "cleared"  — fully paid
       "forgiven" — admin write-off
     """
     q = select(Credit)
-    if status_filter == "all":
+    if not isinstance(status_filter, str):
+        statuses = [status.value for status in status_filter]
+        if not statuses:
+            return []
+        q = q.where(Credit.status.in_(statuses))
+    elif status_filter == "all":
         pass
-    elif status_filter in ("active", "open"):
+    elif status_filter == "open":
         q = q.where(Credit.status.in_([s.value for s in _OPEN_STATUSES]))
+    elif status_filter == "active":
+        q = q.where(Credit.status == CreditStatus.active)
     elif status_filter == "partial":
         q = q.where(Credit.status == CreditStatus.partial)
     elif status_filter == "cleared":
@@ -277,21 +301,10 @@ def list_credits_by_filter(
     elif status_filter == "forgiven":
         q = q.where(Credit.status == CreditStatus.forgiven)
 
-    if date_filter == "payment" and (start_date is not None or end_date is not None):
-        payment_q = select(CreditPayment.credit_id)
-        if start_date is not None:
-            payment_q = payment_q.where(CreditPayment.date >= start_date)
-        if end_date is not None:
-            payment_q = payment_q.where(CreditPayment.date <= end_date)
-        credit_ids = list(session.exec(payment_q).all())
-        if not credit_ids:
-            return []
-        q = q.where(Credit.id.in_(credit_ids))
-    else:
-        if start_date is not None:
-            q = q.where(Credit.date >= start_date)
-        if end_date is not None:
-            q = q.where(Credit.date <= end_date)
+    if start_date is not None:
+        q = q.where(Credit.date >= start_date)
+    if end_date is not None:
+        q = q.where(Credit.date <= end_date)
 
     query = search.strip()
     if query:
@@ -299,6 +312,70 @@ def list_credits_by_filter(
         q = q.where(or_(Credit.customer_surname.like(pattern), Credit.code.like(pattern)))
 
     return list(session.exec(q.order_by(Credit.date.desc())).all())
+
+
+def list_credit_payments_by_filter(
+    session: Session,
+    *,
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
+    search: str = "",
+) -> list[CreditPaymentDisplayRow]:
+    """Return actual repayment rows with their credit, filtered by date/search."""
+    q = select(CreditPayment)
+    if start_date is not None:
+        q = q.where(CreditPayment.date >= start_date)
+    if end_date is not None:
+        q = q.where(CreditPayment.date <= end_date)
+
+    payment_rows = list(
+        session.exec(
+            q.order_by(CreditPayment.date.desc(), CreditPayment.created_at.desc())
+        ).all()
+    )
+    if not payment_rows:
+        return []
+
+    credit_ids = {p.credit_id for p in payment_rows}
+    credits = {
+        c.id: c
+        for c in session.exec(select(Credit).where(Credit.id.in_(credit_ids))).all()
+    }
+
+    rows: list[CreditPaymentDisplayRow] = [
+        CreditPaymentDisplayRow(
+            credit=credits[p.credit_id],
+            date=p.date,
+            amount=p.amount,
+            created_at=p.created_at,
+            notes=p.notes,
+            payment=p,
+        )
+        for p in payment_rows
+        if p.credit_id in credits
+    ]
+
+    query = search.strip().lower().replace(",", ".")
+
+    def amount_matches(amount: Decimal) -> bool:
+        fixed = f"{amount:.2f}"
+        compact = fixed.rstrip("0").rstrip(".")
+        return query in fixed or query in compact
+
+    def matches(row: CreditPaymentDisplayRow) -> bool:
+        return (
+            not query
+            or query in row.credit.customer_surname.lower()
+            or query in row.credit.code.lower()
+            or query in (row.notes or "").lower()
+            or amount_matches(row.amount)
+        )
+
+    return sorted(
+        (row for row in rows if matches(row)),
+        key=lambda row: (row.date, row.created_at),
+        reverse=True,
+    )
 
 
 def list_all_credits(session: Session, *, include_cleared: bool = False) -> list[Credit]:
@@ -317,3 +394,69 @@ def list_payments_for_credit(session: Session, credit_id: int) -> list[CreditPay
             .order_by(CreditPayment.date)
         ).all()
     )
+
+
+def list_payments_for_credits(
+    session: Session,
+    credit_ids: list[int],
+) -> dict[int, list[CreditPayment]]:
+    """Return payment rows grouped by credit id for list previews."""
+    if not credit_ids:
+        return {}
+
+    rows = list(
+        session.exec(
+            select(CreditPayment)
+            .where(CreditPayment.credit_id.in_(credit_ids))
+            .order_by(CreditPayment.date.desc(), CreditPayment.created_at.desc())
+        ).all()
+    )
+    grouped: dict[int, list[CreditPayment]] = {credit_id: [] for credit_id in credit_ids}
+    for payment in rows:
+        grouped.setdefault(payment.credit_id, []).append(payment)
+    return grouped
+
+
+def list_credit_sale_amounts(
+    session: Session,
+    credits: list[Credit],
+) -> dict[int, CreditSaleAmounts]:
+    """Return original sale totals and initial paid amounts for credit display."""
+    credits_by_txn = {
+        credit.transaction_id: credit
+        for credit in credits
+        if credit.id is not None
+    }
+    if not credits_by_txn:
+        return {}
+
+    txns = list(
+        session.exec(
+            select(Transaction).where(Transaction.id.in_(credits_by_txn.keys()))
+        ).all()
+    )
+    line_items = list(
+        session.exec(
+            select(LineItem).where(LineItem.transaction_id.in_(credits_by_txn.keys()))
+        ).all()
+    )
+    totals_by_txn: dict[int, Decimal] = {}
+    for item in line_items:
+        totals_by_txn[item.transaction_id] = (
+            totals_by_txn.get(item.transaction_id, Decimal("0")) + item.line_total
+        )
+
+    result: dict[int, CreditSaleAmounts] = {}
+    for txn in txns:
+        credit = credits_by_txn.get(txn.id)
+        if credit is None or credit.id is None:
+            continue
+        fallback_total = (txn.amount_received + credit.original_amount).quantize(
+            Decimal("0.01")
+        )
+        sale_total = totals_by_txn.get(txn.id, fallback_total).quantize(Decimal("0.01"))
+        result[credit.id] = CreditSaleAmounts(
+            sale_total=sale_total,
+            initial_paid=txn.amount_received.quantize(Decimal("0.01")),
+        )
+    return result

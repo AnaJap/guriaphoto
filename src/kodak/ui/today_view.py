@@ -191,9 +191,9 @@ class TodayView:
         self._stats_row.controls = self._build_stat_cards()
         self._sync_layout_chrome()
         if self._header_area.page is not None:
-            self._header_area.update()
+            _safe_update(self._header_area)
         elif self._stats_row.page is not None:
-            self._stats_row.update()
+            _safe_update(self._stats_row)
 
     # ──────────────────────────────────────────── tabs
 
@@ -221,17 +221,17 @@ class TodayView:
                 self._get_history_panel().reload_if_stale()
             self._sync_layout_chrome()
             if self._header_area.page is not None:
-                self._header_area.update()
+                _safe_update(self._header_area)
             if self._content_shell.page is not None:
-                self._content_shell.update()
-            self._tab_row.update()
+                _safe_update(self._content_shell)
+            _safe_update(self._tab_row)
             if k == "entry":
                 self._content.content = self._make_entry_view()
             elif k == "history":
                 self._content.content = self._get_history_panel().build()
             else:
                 self._content.content = self._get_cash_view().build()
-            self._content.update()
+            _safe_update(self._content)
 
         return ft.Container(
             content=ft.Row(
@@ -548,11 +548,11 @@ class _HistoryPanel:
         if which == "start":
             self._dp_start.value = self._start
             self._dp_start.open = True
-            self._dp_start.update()
+            _safe_update(self._dp_start)
         else:
             self._dp_end.value = self._end
             self._dp_end.open = True
-            self._dp_end.update()
+            _safe_update(self._dp_end)
 
     def _on_start_picked(self, e) -> None:
         raw = e.control.value
@@ -690,7 +690,7 @@ class _HistoryPanel:
         self._export_feedback.color = ft.Colors.ERROR if error else ft.Colors.PRIMARY
         self._export_feedback.visible = bool(message)
         if self._mounted and self._export_feedback.page is not None:
-            self._export_feedback.update()
+            _safe_update(self._export_feedback)
 
     # ── data ─────────────────────────────────────────────────────────
 
@@ -869,53 +869,43 @@ class _HistoryPanel:
         self._search_query = (e.control.value or "").strip().lower()
         self._editing_txn_id = None
         self._build_list_controls(self._rows)
-        self._list_count.update()
-        self._list_col.update()
+        _safe_update(self._list_count)
+        _safe_update(self._list_col)
 
-    # ── editable card (read-only card + edit pencil overlay) ─────────
+    # ── editable card (fixed lanes for description, amount, status, edit) ──
 
-    def _history_row(self, d: TxnDetail) -> ft.Row:
-        """One record line: framed card + credit badge + edit button, side by side.
+    def _history_row(self, d: TxnDetail) -> ft.Container:
+        """One record line with fixed internal lanes.
 
-        The badge and edit button sit OUTSIDE the card frame so they never
-        overlap the amounts, and every row's figures line up vertically.
+        Totals, credit status, and edit live in separate columns inside the same
+        frame, so the money figures align while controls never overlap them.
         """
         runtime = get_active_theme_runtime()
-        controls: list[ft.Control] = [
-            _txn_card(d, runtime),
-            _credit_badge_zone(d, runtime),
-        ]
-
+        edit_control: ft.Control = ft.Container(width=_EDIT_W)
         if self._can_edit_records:
             def on_edit(e, txn_id=d.txn.id):
                 self._editing_txn_id = txn_id
                 self._build_list_controls(self._rows)
-                self._list_col.update()
+                _safe_update(self._list_col)
 
-            controls.append(
-                ft.Container(
-                    content=ft.Icon(
-                        ft.Icons.EDIT_OUTLINED, size=14,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                    on_click=on_edit,
-                    ink=True,
-                    border_radius=RADIUS_SM,
-                    bgcolor=runtime.panel_bg,
-                    border=ft.border.all(1, runtime.panel_border),
-                    padding=ft.padding.all(5),
-                    alignment=ft.Alignment(0, 0),
-                    width=_EDIT_W,
-                    height=_EDIT_W,
-                    tooltip="რედაქტირება",
-                )
+            edit_control = ft.Container(
+                content=ft.Icon(
+                    ft.Icons.EDIT_OUTLINED, size=15,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                on_click=on_edit,
+                ink=True,
+                border_radius=RADIUS_SM,
+                bgcolor=_with_alpha(runtime.accent, 0.04),
+                border=ft.border.all(1, runtime.panel_border),
+                padding=ft.padding.all(5),
+                alignment=ft.Alignment(0, 0),
+                width=_EDIT_W,
+                height=_EDIT_W,
+                tooltip="რედაქტირება",
             )
 
-        return ft.Row(
-            controls=controls,
-            spacing=SPACE_SM,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
+        return _txn_record(d, runtime, edit_control)
 
     # ── inline edit form ─────────────────────────────────────────────
 
@@ -983,7 +973,7 @@ class _HistoryPanel:
         def _cancel(e=None):
             self._editing_txn_id = None
             self._build_list_controls(self._rows)
-            self._list_col.update()
+            _safe_update(self._list_col)
 
         def on_save(e):
             feedback.color = ft.Colors.ERROR
@@ -992,12 +982,12 @@ class _HistoryPanel:
                 received = Decimal(raw)
             except Exception:
                 feedback.value = "შეიყვანეთ სწორი თანხა."
-                feedback.update()
+                _safe_update(feedback)
                 return
             sn = (surname_f.value or "").strip()
             if not sn:
                 feedback.value = "გვარი სავალდებულოა."
-                feedback.update()
+                _safe_update(feedback)
                 return
             try:
                 with get_session() as session:
@@ -1010,7 +1000,7 @@ class _HistoryPanel:
                     )
             except ValueError as exc:
                 feedback.value = str(exc)
-                feedback.update()
+                _safe_update(feedback)
                 return
             self._editing_txn_id = None
             self._load_data()
@@ -1030,11 +1020,11 @@ class _HistoryPanel:
                           text_color=ft.Colors.ON_SURFACE),
             ]
             confirm_row.visible = True
-            confirm_row.update()
+            _safe_update(confirm_row)
 
         def _hide_confirm():
             confirm_row.visible = False
-            confirm_row.update()
+            _safe_update(confirm_row)
 
         def on_delete_confirm(e):
             feedback.color = ft.Colors.ERROR
@@ -1043,9 +1033,9 @@ class _HistoryPanel:
                     delete_transaction(session, d.txn.id)
             except ValueError as exc:
                 confirm_row.visible = False
-                confirm_row.update()
+                _safe_update(confirm_row)
                 feedback.value = str(exc)
-                feedback.update()
+                _safe_update(feedback)
                 return
             self._editing_txn_id = None
             self._load_data()
@@ -1119,98 +1109,104 @@ class _HistoryPanel:
         """Push control updates to the page (only when mounted)."""
         if not self._mounted:
             return
-        self._preset_row.update()
-        self._from_label.update()
-        self._to_label.update()
-        self._summary_row.update()
-        self._cat_col.update()
-        self._list_count.update()
-        self._list_col.update()
+        _safe_update(self._preset_row)
+        _safe_update(self._from_label)
+        _safe_update(self._to_label)
+        _safe_update(self._summary_row)
+        _safe_update(self._cat_col)
+        _safe_update(self._list_count)
+        _safe_update(self._list_col)
 
 
 # ──────────────────────────────────────────────────── shared helpers
 
-# History row layout widths — keep amounts and trailing zones aligned across rows.
-_AMOUNT_W = 92   # right-aligned amount column inside the card frame
-_BADGE_W = 172   # credit-status zone (outside the frame)
-_EDIT_W = 30     # edit-pencil zone (outside the frame)
+# History row fixed lanes — keep amounts and edit aligned across rows.
+_TIME_W = 44
+_AMOUNT_W = 104
+_EDIT_W = 34
 
 
-def _txn_card(d: TxnDetail, runtime=None) -> ft.Container:
-    """Bordered record frame: time · description · right-aligned amounts.
-
-    The credit badge and edit button live OUTSIDE this frame (see
-    `_HistoryPanel._history_row`) so they never overlap the amounts and every
-    row's figures sit at the same x.
-    """
+def _txn_record(d: TxnDetail, runtime, edit_control: ft.Control) -> ft.Container:
+    """Full-width record frame with fixed money/action lanes."""
     runtime = runtime or get_active_theme_runtime()
     time_str = clock.to_local(d.txn.created_at).strftime("%H:%M")
     item_summary = ", ".join(
         f"{prod.name} {prod.size_label or ''}".strip() + f" x{li.quantity}"
         for li, prod in d.items
     )
+    description_controls: list[ft.Control] = [
+        ft.Text(
+            d.txn.customer_surname,
+            size=14,
+            weight=ft.FontWeight.W_600,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+        ft.Text(
+            item_summary or "—",
+            size=11,
+            color=runtime.muted_text,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+    ]
+    credit_note = _credit_note(d, runtime)
+    if credit_note is not None:
+        description_controls.append(credit_note)
 
     return ft.Container(
         content=ft.Row(
             controls=[
-                ft.Text(time_str, size=10, color=ft.Colors.ON_SURFACE_VARIANT, width=34),
+                ft.Text(
+                    time_str, size=11, color=ft.Colors.ON_SURFACE_VARIANT,
+                    width=_TIME_W,
+                ),
                 ft.Column(
-                    controls=[
-                        ft.Text(d.txn.customer_surname, size=14,
-                                weight=ft.FontWeight.W_600),
-                        ft.Text(
-                            item_summary or "—",
-                            size=10,
-                            color=runtime.muted_text,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                    ],
+                    controls=description_controls,
                     spacing=0,
                     tight=True,
                     expand=True,
                 ),
-                ft.Column(
-                    controls=[
-                        ft.Text(
-                            f"₾{d.total:.2f}",
-                            size=14,
-                            weight=ft.FontWeight.W_700,
-                            text_align=ft.TextAlign.RIGHT,
-                        ),
-                        ft.Text(
-                            f"მიღ. ₾{d.txn.amount_received:.2f}",
-                            size=9,
-                            color=runtime.muted_text,
-                            text_align=ft.TextAlign.RIGHT,
-                        ),
-                    ],
-                    spacing=0,
-                    tight=True,
-                    width=_AMOUNT_W,
-                    horizontal_alignment=ft.CrossAxisAlignment.END,
-                ),
+                _amount_cell(d, runtime),
+                edit_control,
             ],
-            spacing=SPACE_XS,
+            spacing=SPACE_SM,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=runtime.panel_bg,
         border=ft.border.all(1, runtime.panel_border),
         border_radius=RADIUS_MD,
-        padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=6),
-        expand=True,
+        padding=ft.padding.symmetric(horizontal=SPACE_SM + 2, vertical=7),
     )
 
 
-def _credit_badge_zone(d: TxnDetail, runtime=None) -> ft.Container:
-    """Fixed-width credit-status zone placed to the right of the frame.
+def _amount_cell(d: TxnDetail, runtime) -> ft.Column:
+    return ft.Column(
+        controls=[
+            ft.Text(
+                f"₾{d.total:.2f}",
+                size=15,
+                weight=ft.FontWeight.W_700,
+                text_align=ft.TextAlign.RIGHT,
+                no_wrap=True,
+            ),
+            ft.Text(
+                f"მიღ. ₾{d.txn.amount_received:.2f}",
+                size=10,
+                color=runtime.muted_text,
+                text_align=ft.TextAlign.RIGHT,
+                no_wrap=True,
+            ),
+        ],
+        spacing=0,
+        tight=True,
+        width=_AMOUNT_W,
+        horizontal_alignment=ft.CrossAxisAlignment.END,
+    )
 
-    Returns an empty spacer (same width) when there is no credit, so amounts
-    stay aligned whether or not a row has a credit.
-    """
-    runtime = runtime or get_active_theme_runtime()
+
+def _credit_note(d: TxnDetail, runtime) -> ft.Control | None:
     if d.credit is None:
-        return ft.Container(width=_BADGE_W)
+        return None
 
     status = d.credit.status
     if status == CreditStatus.cleared:
@@ -1219,17 +1215,23 @@ def _credit_badge_zone(d: TxnDetail, runtime=None) -> ft.Container:
         color, text = "#9575CD", "ნისია ნაპატიები"
     else:
         color = runtime.accent
-        text = f"ნისია {d.credit.code}  ₾{d.credit.remaining_amount:.2f}"
+        text = f"ნისია {d.credit.code} · დარჩ. ₾{d.credit.remaining_amount:.2f}"
 
-    pill = ft.Container(
-        content=ft.Text(text, size=10, weight=ft.FontWeight.W_600,
-                        color=ft.Colors.WHITE, no_wrap=True,
-                        overflow=ft.TextOverflow.ELLIPSIS),
-        bgcolor=color,
-        border_radius=RADIUS_SM,
-        padding=ft.padding.symmetric(horizontal=SPACE_SM, vertical=3),
+    return ft.Row(
+        controls=[
+            ft.Icon(ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, size=11, color=color),
+            ft.Text(
+                text,
+                size=10,
+                weight=ft.FontWeight.W_600,
+                color=color,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+        ],
+        spacing=3,
+        tight=True,
     )
-    return ft.Container(content=pill, width=_BADGE_W, alignment=ft.Alignment(1, 0))
 
 
 def _mini_btn(
@@ -1253,6 +1255,13 @@ def _mini_btn(
         ink=True,
         expand=expand,
     )
+
+
+def _safe_update(control: ft.Control) -> None:
+    try:
+        control.update()
+    except AssertionError:
+        pass
 
 
 def _stat_card(
